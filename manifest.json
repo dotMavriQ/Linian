@@ -1,0 +1,11 @@
+{
+    "id": "linian",
+    "name": "Linian",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Convert Linear issue shortcodes into clickable links with status-based styling",
+    "author": "Jonatan Jansson",
+    "authorUrl": "https://github.com/dotMavriQ",
+    "fundingUrl": "https://liberapay.com/dotMavriQ/",
+    "isDesktopOnly": false
+}
