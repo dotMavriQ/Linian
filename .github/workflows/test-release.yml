@@ -25,7 +25,7 @@ jobs:
 
       - name: List files
         run: ls -la
-        
+
       - name: Create test zip
         run: zip linian-test.zip main.js manifest.json styles.css versions.json
 
