@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - main
+  push:
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
+      - '*'
 
 env:
   PLUGIN_NAME: linian
@@ -13,9 +14,9 @@ env:
 jobs:
   # Deploy to release branch on every push to main
   deploy-release-branch:
-    if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
+    
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,18 +26,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-
-      - name: Cache node modules
-        uses: actions/cache@v4
-        env:
-          cache-name: cache-node-modules
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
 
       - name: Install dependencies
         run: npm ci
@@ -48,7 +37,6 @@ jobs:
         run: |
           mkdir -p release-temp/${{ env.PLUGIN_NAME }}
           cp main.js manifest.json styles.css release-temp/${{ env.PLUGIN_NAME }}/
-          # Copy versions.json if it exists
           if [ -f "versions.json" ]; then
             cp versions.json release-temp/${{ env.PLUGIN_NAME }}/
           fi
@@ -75,18 +63,6 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Cache node modules
-        uses: actions/cache@v4
-        env:
-          cache-name: cache-node-modules
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
-
       - name: Install dependencies
         run: npm ci
 
@@ -95,66 +71,35 @@ jobs:
 
       - name: Create release assets
         run: |
-          # Create plugin folder with all necessary files
           mkdir ${{ env.PLUGIN_NAME }}
           cp main.js manifest.json styles.css ${{ env.PLUGIN_NAME }}/
-
-          # Copy versions.json if it exists
           if [ -f "versions.json" ]; then
             cp versions.json ${{ env.PLUGIN_NAME }}/
           fi
-
-          # Create plugin zip for easy installation
           zip -r ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip ${{ env.PLUGIN_NAME }}
 
-          # Create individual file zip for backward compatibility
-          zip plugin-files.zip main.js manifest.json styles.css $([ -f "versions.json" ] && echo "versions.json" || echo "")
-
-      - name: Extract release notes
-        id: release_notes
-        run: |
-          if [ -f "CHANGELOG.md" ]; then
-            # Extract notes for this version from CHANGELOG
-            VERSION=${{ github.ref_name }}
-            NOTES=$(sed -n "/## \[$VERSION\]/,/## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
-            if [ -n "$NOTES" ]; then
-              echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
-              echo "$NOTES" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            fi
-          fi
-
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: "Linian v${{ github.ref_name }}"
           body: |
             ## Linian Obsidian Plugin v${{ github.ref_name }}
-
-            ${{ steps.release_notes.outputs.RELEASE_NOTES }}
-
+            
             ### Installation
-
+            
             **Option 1: Download Plugin Folder (Recommended)**
             1. Download `${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip`
             2. Extract the zip file
             3. Copy the `${{ env.PLUGIN_NAME }}` folder to your vault's `.obsidian/plugins/` directory
             4. Enable the plugin in Obsidian Settings → Community Plugins
-
+            
             **Option 2: Manual Installation**
             1. Download `main.js`, `manifest.json`, and `styles.css`
             2. Create a folder named `${{ env.PLUGIN_NAME }}` in your vault's `.obsidian/plugins/` directory
             3. Place the downloaded files in that folder
             4. Enable the plugin in Obsidian Settings → Community Plugins
-
-            ### What's Included
-            - `main.js` - The compiled plugin code
-            - `manifest.json` - Plugin metadata
-            - `styles.css` - Plugin styling
-            - `versions.json` - Version compatibility information
-
+            
           draft: false
           prerelease: false
           files: |
