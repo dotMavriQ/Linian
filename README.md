@@ -24,18 +24,35 @@ Our goal was to match that same level of functionality and user experience, but 
 
 ## Installation
 
-### From Obsidian Community Plugins
+### From Obsidian Community Plugins (Coming Soon)
 
 1. Open Obsidian Settings
 2. Go to Community Plugins and disable Safe Mode
 3. Click Browse and search for "Linian"
 4. Install and enable the plugin
 
-### Manual Installation
+### Manual Installation from GitHub Releases
 
-1. Download the latest release from [GitHub Releases](https://github.com/dotMavriQ/linian/releases)
-2. Extract the files to your vault's `.obsidian/plugins/lilian/` folder
-3. Enable the plugin in Obsidian Settings > Community Plugins
+**Option 1: Download Plugin Folder (Recommended)**
+1. Go to [GitHub Releases](https://github.com/dotMavriQ/linian/releases)
+2. Download the latest `linian-x.x.x.zip` file
+3. Extract the zip file to get the `linian` folder
+4. Copy the `linian` folder to your vault's `.obsidian/plugins/` directory
+5. Enable the plugin in Obsidian Settings → Community Plugins
+
+**Option 2: Download Individual Files**
+1. Go to [GitHub Releases](https://github.com/dotMavriQ/linian/releases)
+2. Download `main.js`, `manifest.json`, and `styles.css`
+3. Create a folder named `linian` in your vault's `.obsidian/plugins/` directory
+4. Place the downloaded files in the `linian` folder
+5. Enable the plugin in Obsidian Settings → Community Plugins
+
+### Development Installation
+
+For the latest development version:
+1. Clone this repository
+2. Run `npm install && npm run build`
+3. Copy the built files to your plugins directory using `./deploy.sh`
 
 ## Setup
 
