@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - '*'
+      - "*"
 
 env:
   PLUGIN_NAME: linian
@@ -15,7 +15,7 @@ jobs:
   deploy-release-branch:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,12 +70,8 @@ jobs:
 
       - name: Create release assets
         run: |
-          mkdir ${{ env.PLUGIN_NAME }}
-          cp main.js manifest.json styles.css ${{ env.PLUGIN_NAME }}/
-          if [ -f "versions.json" ]; then
-            cp versions.json ${{ env.PLUGIN_NAME }}/
-          fi
-          zip -r ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip ${{ env.PLUGIN_NAME }}
+          # Create zip with files directly in root (correct Obsidian plugin structure)
+          zip ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip main.js manifest.json styles.css versions.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -84,21 +80,21 @@ jobs:
           name: "Linian v${{ github.ref_name }}"
           body: |
             ## Linian Obsidian Plugin v${{ github.ref_name }}
-            
+
             ### Installation
-            
+
             **Option 1: Download Plugin Folder (Recommended)**
             1. Download `${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip`
             2. Extract the zip file
             3. Copy the `${{ env.PLUGIN_NAME }}` folder to your vault's `.obsidian/plugins/` directory
             4. Enable the plugin in Obsidian Settings → Community Plugins
-            
+
             **Option 2: Manual Installation**
             1. Download `main.js`, `manifest.json`, and `styles.css`
             2. Create a folder named `${{ env.PLUGIN_NAME }}` in your vault's `.obsidian/plugins/` directory
             3. Place the downloaded files in that folder
             4. Enable the plugin in Obsidian Settings → Community Plugins
-            
+
           draft: false
           prerelease: false
           files: |

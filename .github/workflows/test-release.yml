@@ -25,6 +25,9 @@ jobs:
 
       - name: List files
         run: ls -la
+        
+      - name: Create test zip
+        run: zip linian-test.zip main.js manifest.json styles.css versions.json
 
       - name: Create test release
         uses: softprops/action-gh-release@v1
@@ -32,6 +35,7 @@ jobs:
           name: "Test Release ${{ github.ref_name }}"
           body: "Test release to debug workflow issues"
           files: |
+            linian-test.zip
             main.js
             manifest.json
             styles.css
