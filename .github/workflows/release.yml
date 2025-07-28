@@ -2,6 +2,8 @@ name: Release Obsidian Plugin
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
 
@@ -9,19 +11,23 @@ env:
   PLUGIN_NAME: linian
 
 jobs:
-  build:
+  # Deploy to release branch on every push to main
+  deploy-release-branch:
+    if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-
+    
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
 
       - name: Cache node modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -38,59 +44,122 @@ jobs:
       - name: Build plugin
         run: npm run build
 
-      - name: Create release zip
+      - name: Create release folder structure
         run: |
+          mkdir -p release-temp/${{ env.PLUGIN_NAME }}
+          cp main.js manifest.json styles.css release-temp/${{ env.PLUGIN_NAME }}/
+          # Copy versions.json if it exists
+          if [ -f "versions.json" ]; then
+            cp versions.json release-temp/${{ env.PLUGIN_NAME }}/
+          fi
+
+      - name: Deploy to release branch
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: release
+          publish_dir: ./release-temp
+          force_orphan: true
+          commit_message: "Deploy built plugin files for ${{ github.sha }}"
+
+  # Create GitHub Release on tag push
+  create-github-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Create release assets
+        run: |
+          # Create plugin folder with all necessary files
           mkdir ${{ env.PLUGIN_NAME }}
-          cp main.js manifest.json styles.css ${{ env.PLUGIN_NAME }}
-          zip -r ${{ env.PLUGIN_NAME }}.zip ${{ env.PLUGIN_NAME }}
+          cp main.js manifest.json styles.css ${{ env.PLUGIN_NAME }}/
+          
+          # Copy versions.json if it exists
+          if [ -f "versions.json" ]; then
+            cp versions.json ${{ env.PLUGIN_NAME }}/
+          fi
+          
+          # Create plugin zip for easy installation
+          zip -r ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip ${{ env.PLUGIN_NAME }}
+          
+          # Create individual file zip for backward compatibility
+          zip plugin-files.zip main.js manifest.json styles.css $([ -f "versions.json" ] && echo "versions.json" || echo "")
+
+      - name: Extract release notes
+        id: release_notes
+        run: |
+          if [ -f "CHANGELOG.md" ]; then
+            # Extract notes for this version from CHANGELOG
+            VERSION=${{ github.ref_name }}
+            NOTES=$(sed -n "/## \[$VERSION\]/,/## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
+            if [ -n "$NOTES" ]; then
+              echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+              echo "$NOTES" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            fi
+          fi
 
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          tag_name: ${{ github.ref_name }}
+          name: "Linian v${{ github.ref_name }}"
+          body: |
+            ## Linian Obsidian Plugin v${{ github.ref_name }}
+            
+            ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+            
+            ### Installation
+            
+            **Option 1: Download Plugin Folder (Recommended)**
+            1. Download `${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip`
+            2. Extract the zip file
+            3. Copy the `${{ env.PLUGIN_NAME }}` folder to your vault's `.obsidian/plugins/` directory
+            4. Enable the plugin in Obsidian Settings → Community Plugins
+            
+            **Option 2: Manual Installation**
+            1. Download `main.js`, `manifest.json`, and `styles.css`
+            2. Create a folder named `${{ env.PLUGIN_NAME }}` in your vault's `.obsidian/plugins/` directory
+            3. Place the downloaded files in that folder
+            4. Enable the plugin in Obsidian Settings → Community Plugins
+            
+            ### What's Included
+            - `main.js` - The compiled plugin code
+            - `manifest.json` - Plugin metadata
+            - `styles.css` - Plugin styling
+            - `versions.json` - Version compatibility information
+            
           draft: false
           prerelease: false
-
-      - name: Upload main.js
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./main.js
-          asset_name: main.js
-          asset_content_type: text/javascript
-
-      - name: Upload manifest.json
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./manifest.json
-          asset_name: manifest.json
-          asset_content_type: application/json
-
-      - name: Upload styles.css
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./styles.css
-          asset_name: styles.css
-          asset_content_type: text/css
-
-      - name: Upload plugin zip
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.PLUGIN_NAME }}.zip
-          asset_name: ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
+          files: |
+            ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip
+            main.js
+            manifest.json
+            styles.css
+            versions.json
