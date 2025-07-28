@@ -43,6 +43,7 @@ class LinearIssueWidget extends WidgetType {
   private _htmlContainer: HTMLElement;
   private _apiService: LinearAPIService;
   private _renderer: LinearRenderer;
+  private _destroyed: boolean = false;
 
   constructor(
     key: string,
@@ -59,14 +60,23 @@ class LinearIssueWidget extends WidgetType {
   }
 
   buildTag() {
+    // Check if destroyed to prevent memory leaks
+    if (this._destroyed) return;
+
     // Show loading initially
     const loadingElement = this._renderer.createLoadingElement(this._issueKey);
     this._htmlContainer.appendChild(loadingElement);
 
-    // Fetch issue data
-    this._apiService
-      .getIssue(this._issueKey)
-      .then((issue) => {
+    // Fetch issue data with timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("API timeout")), 10000)
+    );
+
+    Promise.race([this._apiService.getIssue(this._issueKey), timeoutPromise])
+      .then((result) => {
+        if (this._destroyed) return; // Don't update if destroyed
+
+        const issue = result as LinearIssue | null;
         if (issue) {
           const issueElement = this._renderer.createIssueElement(issue);
           this._htmlContainer.replaceChildren(issueElement);
@@ -78,6 +88,8 @@ class LinearIssueWidget extends WidgetType {
         }
       })
       .catch((error) => {
+        if (this._destroyed) return; // Don't update if destroyed
+
         console.error("Error fetching Linear issue:", error);
         const errorElement = this._renderer.createErrorElement(this._issueKey);
         this._htmlContainer.replaceChildren(errorElement);
@@ -86,6 +98,12 @@ class LinearIssueWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     return this._htmlContainer;
+  }
+
+  destroy() {
+    this._destroyed = true;
+    // Clean up DOM references
+    this._htmlContainer.replaceChildren();
   }
 }
 

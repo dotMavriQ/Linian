@@ -129,6 +129,26 @@ export default class LinianPlugin extends Plugin {
 
   onunload() {
     console.log("Unloading Linian plugin...");
+
+    // Clean up services and prevent memory leaks
+    if (this.apiService) {
+      this.apiService.clearCache();
+      this.apiService = null;
+    }
+
+    if (this.renderer) {
+      this.renderer = null;
+    }
+
+    if (this.viewPluginManager) {
+      this.viewPluginManager = null;
+    }
+
+    // Clear any remaining DOM elements
+    const linianElements = document.querySelectorAll(
+      ".linian-inline-issue, .linian-tooltip"
+    );
+    linianElements.forEach((el) => el.remove());
   }
 
   async loadSettings() {
@@ -215,13 +235,24 @@ export default class LinianPlugin extends Plugin {
     const testMatches = htmlContent.match(testRegex);
     console.log("Test regex matches:", testMatches);
 
-    // Use regex exec approach like Jira plugin
-    let match;
-    let matchCount = 0;
-    while ((match = LINEAR_SHORTCODE_REGEX.exec(el.innerHTML))) {
-      matchCount++;
-      console.log(`Found regex match #${matchCount}:`, match);
-      const [fullMatch, identifier] = match;
+    // FIXED: Use match() instead of exec() to avoid infinite loops
+    const matches = htmlContent.match(LINEAR_SHORTCODE_REGEX);
+    if (!matches) {
+      console.log("No matches found");
+      return;
+    }
+
+    console.log(`Found ${matches.length} matches:`, matches);
+
+    // Process matches in reverse order to avoid position shifts
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const fullMatch = matches[i];
+      const identifierMatch = fullMatch.match(
+        /\[([A-Za-z]+(?:-[A-Za-z]*)?-\d+)\]/
+      );
+      if (!identifierMatch) continue;
+
+      const identifier = identifierMatch[1];
       console.log(`Processing match: ${fullMatch} -> ${identifier}`);
 
       // Create container with data attributes like Jira plugin
@@ -235,14 +266,15 @@ export default class LinianPlugin extends Plugin {
 
       console.log("Container HTML:", container.outerHTML);
 
-      // Replace in innerHTML like Jira plugin
-      el.innerHTML = el.innerHTML.replace(fullMatch, container.outerHTML);
-
-      // Reset regex lastIndex to avoid infinite loop issues
-      LINEAR_SHORTCODE_REGEX.lastIndex = 0;
+      // FIXED: Replace only the last occurrence to avoid position issues
+      const lastIndex = htmlContent.lastIndexOf(fullMatch);
+      if (lastIndex !== -1) {
+        el.innerHTML =
+          htmlContent.substring(0, lastIndex) +
+          container.outerHTML +
+          htmlContent.substring(lastIndex + fullMatch.length);
+      }
     }
-
-    console.log("Total matches processed:", matchCount);
 
     // Now process all inline issue containers
     const inlineIssueTags = el.querySelectorAll("span.linian-inline-issue");

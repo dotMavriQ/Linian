@@ -1,6 +1,6 @@
 {
     "name": "linian",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Convert Linear issue shortcodes into clickable links with status-based styling",
     "main": "main.js",
     "scripts": {

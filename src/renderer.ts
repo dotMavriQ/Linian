@@ -124,6 +124,11 @@ export class LinearRenderer {
         }
 			`;
 
+      // Add title and meta first
+      tooltipEl.appendChild(titleEl);
+      tooltipEl.appendChild(metaEl);
+
+      // Add description last (proper UX order)
       if (issue.description) {
         const descEl = document.createElement("div");
         descEl.className = "linian-tooltip-description";
@@ -132,9 +137,6 @@ export class LinearRenderer {
           (issue.description.length > 200 ? "..." : "");
         tooltipEl.appendChild(descEl);
       }
-
-      tooltipEl.appendChild(titleEl);
-      tooltipEl.appendChild(metaEl);
 
       // Position tooltip
       const rect = element.getBoundingClientRect();
