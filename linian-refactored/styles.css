@@ -1,0 +1,221 @@
+/* Linian Plugin Styles */
+
+/* Issue Link Base Styles */
+.linian-issue-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 6px;
+	border-radius: 4px;
+	text-decoration: none;
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	font-weight: 500;
+	background-color: var(--background-modifier-border);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	transition: all 0.2s ease;
+}
+
+.linian-issue-link:hover {
+	background-color: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border-hover);
+	text-decoration: none;
+	transform: translateY(-1px);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.linian-issue-content {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.linian-issue-identifier {
+	font-weight: 600;
+}
+
+/* Priority Icons */
+.linian-priority-icon {
+	font-size: 0.8em;
+	margin-right: 2px;
+}
+
+/* Status Indicator */
+.linian-status-indicator {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	display: inline-block;
+	margin-left: 4px;
+}
+
+/* Assignee Avatar */
+.linian-assignee-avatar {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	margin-left: 4px;
+	object-fit: cover;
+}
+
+/* Loading State */
+.linian-loading {
+	color: var(--text-muted);
+	font-style: italic;
+	font-family: var(--font-monospace);
+	padding: 2px 6px;
+	border-radius: 4px;
+	background-color: var(--background-modifier-border);
+	border: 1px solid var(--background-modifier-border);
+	animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Inline Issue Container */
+.linian-inline-issue.linian-container {
+	display: inline-block;
+	margin: 0;
+}
+
+.linian-inline-issue.linian-container .linian-issue-link {
+	padding: 0.1em 0.3em;
+}
+
+/* Shortcode Highlighting in Live Preview */
+.linian-shortcode-highlight {
+	background-color: var(--background-modifier-hover);
+	border-radius: 2px;
+	padding: 1px 2px;
+}
+
+@keyframes pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.5; }
+}
+
+/* Error State */
+.linian-error {
+	color: var(--text-error);
+	font-family: var(--font-monospace);
+	padding: 2px 6px;
+	border-radius: 4px;
+	background-color: rgba(var(--color-red-rgb), 0.1);
+	border: 1px solid rgba(var(--color-red-rgb), 0.3);
+}
+
+/* Tooltip Styles */
+.linian-tooltip {
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 12px;
+	max-width: 300px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+	z-index: 1000;
+	animation: tooltipFadeIn 0.2s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(-100%) scale(0.95);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(-100%) scale(1);
+	}
+}
+
+.linian-tooltip-title {
+	font-weight: 600;
+	font-size: 0.9em;
+	margin-bottom: 8px;
+	color: var(--text-normal);
+	line-height: 1.3;
+}
+
+.linian-tooltip-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-bottom: 8px;
+}
+
+.linian-tooltip-status {
+	padding: 2px 6px;
+	border-radius: 12px;
+	font-size: 0.75em;
+	font-weight: 500;
+	color: white;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.linian-tooltip-team {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	font-weight: 500;
+}
+
+.linian-tooltip-assignee {
+	font-size: 0.8em;
+	color: var(--text-accent);
+	font-weight: 500;
+}
+
+.linian-tooltip-description {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	line-height: 1.4;
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 8px;
+	margin-top: 8px;
+}
+
+/* Dark Theme Adjustments */
+.theme-dark .linian-tooltip {
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+	.linian-issue-link {
+		border-width: 2px;
+	}
+	
+	.linian-status-indicator {
+		border: 1px solid var(--text-normal);
+	}
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+	.linian-issue-link {
+		transition: none;
+	}
+	
+	.linian-issue-link:hover {
+		transform: none;
+	}
+	
+	.linian-loading {
+		animation: none;
+	}
+	
+	.linian-tooltip {
+		animation: none;
+	}
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+	.linian-tooltip {
+		max-width: 250px;
+		padding: 10px;
+	}
+	
+	.linian-assignee-avatar {
+		width: 14px;
+		height: 14px;
+	}
+}
