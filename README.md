@@ -47,6 +47,8 @@ Our goal was to match that same level of functionality and user experience, but 
 4. Place the downloaded files in the `linian` folder
 5. Enable the plugin in Obsidian Settings → Community Plugins
 
+> **Tip:** Prefer automated updates? Add `https://github.com/dotMavriQ/Linian` to the [BRAT](https://obsidian.md/brat) community plugin and it will track the latest `release` branch build for you.
+
 ### Development Installation
 
 For the latest development version:
