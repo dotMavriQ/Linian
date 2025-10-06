@@ -1,0 +1,249 @@
+/* Linian Plugin Styles */
+
+/* Issue Link Base Styles */
+.linian-issue-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+    font-weight: 500;
+    background-color: var(--background-modifier-border);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    transition: all 0.2s ease;
+}
+
+.linian-issue-link:hover {
+    background-color: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border-hover);
+    text-decoration: none;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.linian-issue-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.linian-issue-identifier {
+    font-weight: 600;
+}
+
+/* Priority Icons */
+.linian-priority-icon {
+    font-size: 0.8em;
+    margin-right: 2px;
+}
+
+/* Status Indicator */
+.linian-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 4px;
+}
+
+/* Assignee Avatar */
+.linian-assignee-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    margin-left: 4px;
+    object-fit: cover;
+}
+
+/* Loading State */
+.linian-loading {
+    color: var(--text-muted);
+    font-style: italic;
+    font-family: var(--font-monospace);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: var(--background-modifier-border);
+    border: 1px solid var(--background-modifier-border);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Inline Issue Container */
+.linian-inline-issue.linian-container {
+    display: inline-block;
+    margin: 0;
+}
+
+.linian-inline-issue.linian-container .linian-issue-link {
+    padding: 0.1em 0.3em;
+}
+
+/* Shortcode Highlighting in Live Preview */
+.linian-shortcode-highlight {
+    background-color: var(--background-modifier-hover);
+    border-radius: 2px;
+    padding: 1px 2px;
+}
+
+/* Expanded Issue Variants */
+.linian-issue-link--expanded {
+    gap: 4px;
+}
+
+.linian-issue-link--expanded .linian-issue-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.linian-expanded-dot {
+    font-size: 0.9em;
+    line-height: 1;
+}
+
+.linian-expanded-dot--leading {
+    font-size: 1.1em;
+}
+
+.linian-expanded-dot--trailing {
+    font-size: 0.8em;
+}
+
+.linian-issue-title {
+    font-family: var(--font-default);
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-normal);
+    max-width: 36ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Loading/Error Expanded Variants */
+.linian-loading--expanded,
+.linian-error--expanded {
+    font-family: var(--font-default);
+    font-style: normal;
+    white-space: nowrap;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Error State */
+.linian-error {
+    color: var(--text-error);
+    font-family: var(--font-monospace);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: rgba(var(--color-red-rgb), 0.1);
+    border: 1px solid rgba(var(--color-red-rgb), 0.3);
+}
+
+.linian-error--expanded {
+    font-weight: 500;
+}
+
+/* Tooltip Styles */
+.linian-tooltip {
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    animation: tooltipFadeIn 0.18s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.linian-tooltip-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.linian-tooltip-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 0.8em;
+}
+
+.linian-tooltip-status {
+    padding: 2px 6px;
+    border-radius: 12px;
+    color: #fff;
+    font-weight: 600;
+}
+
+.linian-tooltip-team {
+    color: var(--text-muted);
+}
+
+.linian-tooltip-assignee {
+    color: var(--text-accent);
+}
+
+.linian-tooltip-identifier {
+    font-family: var(--font-monospace);
+    font-size: 0.75em;
+    color: var(--text-faint);
+    margin-bottom: 8px;
+}
+
+.linian-tooltip-description {
+    font-size: 0.8em;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+    .linian-issue-link {
+        border-width: 2px;
+    }
+    
+    .linian-status-indicator {
+        border: 1px solid var(--text-normal);
+    }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+    .linian-issue-link {
+        transition: none;
+    }
+    
+    .linian-issue-link:hover {
+        transform: none;
+    }
+    
+    .linian-loading {
+        animation: none;
+    }
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .linian-assignee-avatar {
+        width: 14px;
+        height: 14px;
+    }
+}
