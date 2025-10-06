@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes yet._
 
+## [1.1.1] - 2025-10-06
+
+### Changed
+- Automated the release pipeline to package BRAT-ready builds, update the `release` branch, and publish GitHub releases whenever new versions land on `main`.
+- Documented BRAT installation instructions so users can opt into automatic updates via the release branch.
+
 ## [1.1.0] - 2025-10-06
 
 ### Added
