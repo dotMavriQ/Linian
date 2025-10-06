@@ -10,8 +10,6 @@ Linian is inspired by the excellent **[Jira Issue](https://github.com/marc0l92/o
 
 Our goal was to match that same level of functionality and user experience, but tailored specifically for Linear's modern issue tracking approach.
 
-![Linian Demo](https://via.placeholder.com/600x300/2D3748/FFFFFF?text=Linian+Demo)
-
 ## Features
 
 - **Automatic Detection**: Recognizes Linear issue shortcodes in your notes (e.g., `[TEAM-123]`)
