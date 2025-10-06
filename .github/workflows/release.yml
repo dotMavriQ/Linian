@@ -121,6 +121,8 @@ jobs:
           else
             echo "HAS_VERSIONS=false" >> $GITHUB_ENV
           fi
+          cp "$RELEASE_NOTES_PATH" "$RUNNER_TEMP/release-notes.md"
+          echo "RELEASE_NOTES_PATH=$RUNNER_TEMP/release-notes.md" >> $GITHUB_ENV
           cp "$ZIP_PATH" "$RUNNER_TEMP/"
           echo "ZIP_PATH=$RUNNER_TEMP/${{ steps.meta.outputs.id }}-${{ steps.meta.outputs.version }}.zip" >> $GITHUB_ENV
           echo "RELEASE_FILES_DIR=$RUNNER_TEMP/plugin-files" >> $GITHUB_ENV
