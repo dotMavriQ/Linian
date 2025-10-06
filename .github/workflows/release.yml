@@ -172,10 +172,10 @@ jobs:
             FILE_LIST+=$'\n'$RELEASE_FILES_DIR/versions.json
           fi
           {
-            echo "RELEASE_FILES<<'EOF'"
-            echo "$FILE_LIST"
-            echo EOF
-          } >> $GITHUB_ENV
+            echo "RELEASE_FILES<<EOF"
+            printf '%s\n' "$FILE_LIST"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         if: steps.check_tag.outputs.exists == 'false'
