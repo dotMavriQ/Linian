@@ -89,18 +89,6 @@ export class LinianSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Display Options" });
 
     new Setting(containerEl)
-      .setName("Enable Tooltips")
-      .setDesc("Show detailed issue information on hover")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableTooltips)
-          .onChange(async (value) => {
-            this.plugin.settings.enableTooltips = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
       .setName("Show Priority Icons")
       .setDesc("Display priority icons next to issue identifiers")
       .addToggle((toggle) =>

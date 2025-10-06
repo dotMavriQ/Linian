@@ -2,7 +2,7 @@
 
 /**
  * Linian Codebase Analysis Tool
- * Analyzes the current codebase to identify refactoring opportunities
+ * Audits the current codebase to highlight improvement opportunities
  */
 
 const fs = require("fs");
@@ -161,8 +161,8 @@ class CodebaseAnalyzer {
       });
     }
 
-    // Refactoring suggestions
-    console.log("\n🔄 REFACTORING SUGGESTIONS:");
+  // Improvement suggestions
+  console.log("\n🔄 IMPROVEMENT SUGGESTIONS:");
     const suggestions = [
       "Consider implementing dependency injection for better testability",
       "Extract interface definitions to separate files",
@@ -181,7 +181,7 @@ class CodebaseAnalyzer {
     });
 
     console.log(
-      "\n✅ Analysis complete! Use this report to guide refactoring efforts."
+      "\n✅ Analysis complete! Use this report to guide future improvements."
     );
   }
 

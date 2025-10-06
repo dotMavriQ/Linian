@@ -1,6 +1,6 @@
 {
     "name": "linian",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "Convert Linear issue shortcodes into clickable links with status-based styling",
     "main": "main.js",
     "scripts": {
@@ -18,7 +18,7 @@
         "issue-tracking",
         "productivity"
     ],
-    "author": "Your Name",
+    "author": "Jonatan Jansson",
     "license": "MIT",
     "devDependencies": {
         "@types/node": "^16.11.6",
@@ -29,6 +29,5 @@
         "obsidian": "latest",
         "tslib": "2.4.0",
         "typescript": "4.7.4"
-    },
-    "dependencies": {}
+    }
 }

@@ -25,11 +25,12 @@ export interface LinearIssue {
   updatedAt: string;
 }
 
+export type IssueDisplayMode = "compact" | "expanded";
+
 export interface LinearSettings {
   apiKey: string;
   organizationId?: string;
   defaultTeam?: string;
-  enableTooltips: boolean;
   enablePriorityIcons: boolean;
   enableAssigneeAvatars: boolean;
   cacheTimeout: number;

@@ -13,7 +13,7 @@ import {
 import { editorLivePreviewField } from "obsidian";
 import { LinearAPIService } from "./api";
 import { LinearRenderer } from "./renderer";
-import { LinearIssue, LinearSettings } from "./types";
+import { IssueDisplayMode, LinearIssue } from "./types";
 import { LINEAR_SHORTCODE_REGEX } from "./constants";
 
 interface IMatchDecoratorRef {
@@ -40,6 +40,7 @@ const isSelectionContainsTag = (
 
 class LinearIssueWidget extends WidgetType {
   private _issueKey: string;
+  private _displayMode: IssueDisplayMode;
   private _htmlContainer: HTMLElement;
   private _apiService: LinearAPIService;
   private _renderer: LinearRenderer;
@@ -48,12 +49,14 @@ class LinearIssueWidget extends WidgetType {
   constructor(
     key: string,
     apiService: LinearAPIService,
-    renderer: LinearRenderer
+    renderer: LinearRenderer,
+    displayMode: IssueDisplayMode
   ) {
     super();
     this._issueKey = key;
     this._apiService = apiService;
     this._renderer = renderer;
+    this._displayMode = displayMode;
     this._htmlContainer = document.createElement("span");
     this._htmlContainer.className = "linian-inline-issue linian-container";
     this.buildTag();
@@ -64,8 +67,11 @@ class LinearIssueWidget extends WidgetType {
     if (this._destroyed) return;
 
     // Show loading initially
-    const loadingElement = this._renderer.createLoadingElement(this._issueKey);
-    this._htmlContainer.appendChild(loadingElement);
+    const loadingElement = this._renderer.createLoadingElement(
+      this._issueKey,
+      this._displayMode
+    );
+    this._htmlContainer.replaceChildren(loadingElement);
 
     // Fetch issue data with timeout to prevent hanging
     const timeoutPromise = new Promise((_, reject) =>
@@ -78,11 +84,15 @@ class LinearIssueWidget extends WidgetType {
 
         const issue = result as LinearIssue | null;
         if (issue) {
-          const issueElement = this._renderer.createIssueElement(issue);
+          const issueElement = this._renderer.createIssueElement(
+            issue,
+            this._displayMode
+          );
           this._htmlContainer.replaceChildren(issueElement);
         } else {
           const errorElement = this._renderer.createErrorElement(
-            this._issueKey
+            this._issueKey,
+            this._displayMode
           );
           this._htmlContainer.replaceChildren(errorElement);
         }
@@ -91,7 +101,10 @@ class LinearIssueWidget extends WidgetType {
         if (this._destroyed) return; // Don't update if destroyed
 
         console.error("Error fetching Linear issue:", error);
-        const errorElement = this._renderer.createErrorElement(this._issueKey);
+        const errorElement = this._renderer.createErrorElement(
+          this._issueKey,
+          this._displayMode
+        );
         this._htmlContainer.replaceChildren(errorElement);
       });
   }
@@ -117,7 +130,10 @@ function buildMatchDecorator(
   linearMatchDecorator.ref = new MatchDecorator({
     regexp: LINEAR_SHORTCODE_REGEX,
     decoration: (match: RegExpExecArray, view: EditorView, pos: number) => {
-      const key = match[1]; // Extract the issue key from regex match
+      const displayMode: IssueDisplayMode = match[1]
+        ? "expanded"
+        : "compact";
+      const key = match[2];
       const tagLength = match[0].length;
 
       // Don't replace if cursor is inside the tag or selection contains it
@@ -132,7 +148,12 @@ function buildMatchDecorator(
         });
       } else {
         return Decoration.replace({
-          widget: new LinearIssueWidget(key, apiService, renderer),
+          widget: new LinearIssueWidget(
+            key,
+            apiService,
+            renderer,
+            displayMode
+          ),
         });
       }
     },

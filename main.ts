@@ -7,8 +7,8 @@ import {
 import { LinearAPIService } from "./src/api";
 import { LinearRenderer } from "./src/renderer";
 import { LinianSettingTab } from "./src/settings";
-import { LinearSettings } from "./src/types";
-import { DEFAULT_SETTINGS, LINEAR_SHORTCODE_REGEX } from "./src/constants";
+import { IssueDisplayMode, LinearSettings } from "./src/types";
+import { DEFAULT_SETTINGS, createShortcodeRegex } from "./src/constants";
 import { LinearViewPluginManager } from "./src/live-preview";
 
 export default class LinianPlugin extends Plugin {
@@ -79,8 +79,7 @@ export default class LinianPlugin extends Plugin {
           const content = activeView.editor.getValue();
           console.log("Full page content:", content);
 
-          const regex = /\[([A-Za-z]+(?:-[A-Za-z]*)?-\d+)\]/gi;
-          const matches = content.match(regex);
+          const matches = content.match(createShortcodeRegex());
           console.log("Found matches in content:", matches);
         }
 
@@ -90,7 +89,7 @@ export default class LinianPlugin extends Plugin {
         elements.forEach((el) => {
           if (
             el.textContent &&
-            /\[[A-Za-z]+(?:-[A-Za-z]*)?-\d+\]/.test(el.textContent)
+            createShortcodeRegex().test(el.textContent)
           ) {
             foundElements.push({
               element: el,
@@ -146,7 +145,7 @@ export default class LinianPlugin extends Plugin {
 
     // Clear any remaining DOM elements
     const linianElements = document.querySelectorAll(
-      ".linian-inline-issue, .linian-tooltip"
+      ".linian-inline-issue"
     );
     linianElements.forEach((el) => el.remove());
   }
@@ -181,7 +180,7 @@ export default class LinianPlugin extends Plugin {
   private initializeRenderer() {
     if (!this.apiService) return;
 
-    this.renderer = new LinearRenderer(this.settings, document.body);
+    this.renderer = new LinearRenderer(this.settings);
 
     // Update view plugin manager with services
     if (this.viewPluginManager) {
@@ -226,71 +225,91 @@ export default class LinianPlugin extends Plugin {
       return;
     }
 
-    const htmlContent = el.innerHTML;
-    console.log("HTML content to process:", htmlContent);
-    console.log("Element type:", el.tagName, el.className);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
 
-    // Test if our regex would match
-    const testRegex = /\[([A-Za-z]+(?:-[A-Za-z]*)?-\d+)\]/gi;
-    const testMatches = htmlContent.match(testRegex);
-    console.log("Test regex matches:", testMatches);
-
-    // FIXED: Use match() instead of exec() to avoid infinite loops
-    const matches = htmlContent.match(LINEAR_SHORTCODE_REGEX);
-    if (!matches) {
-      console.log("No matches found");
-      return;
+    while (walker.nextNode()) {
+      const current = walker.currentNode as Text;
+      if (!current.nodeValue?.length) continue;
+      if (current.parentElement?.closest(".linian-inline-issue")) continue;
+      textNodes.push(current);
     }
 
-    console.log(`Found ${matches.length} matches:`, matches);
+    if (!textNodes.length) {
+      console.log("No text nodes to process");
+    }
 
-    // Process matches in reverse order to avoid position shifts
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const fullMatch = matches[i];
-      const identifierMatch = fullMatch.match(
-        /\[([A-Za-z]+(?:-[A-Za-z]*)?-\d+)\]/
-      );
-      if (!identifierMatch) continue;
+    textNodes.forEach((textNode) => {
+      const sourceText = textNode.nodeValue ?? "";
+      const regex = createShortcodeRegex();
 
-      const identifier = identifierMatch[1];
-      console.log(`Processing match: ${fullMatch} -> ${identifier}`);
+      let match: RegExpExecArray | null;
+      let lastIndex = 0;
+      let hasMatch = false;
+      const fragment = document.createDocumentFragment();
 
-      // Create container with data attributes like Jira plugin
-      const container = document.createElement("span");
-      container.className = "linian-inline-issue linian-container";
-      container.setAttribute("data-issue-key", identifier);
+      while ((match = regex.exec(sourceText)) !== null) {
+        hasMatch = true;
 
-      // Add loading element
-      const loadingElement = this.renderer.createLoadingElement(identifier);
-      container.appendChild(loadingElement);
+        const precedingText = sourceText.slice(lastIndex, match.index);
+        if (precedingText) {
+          fragment.appendChild(document.createTextNode(precedingText));
+        }
 
-      console.log("Container HTML:", container.outerHTML);
+        const displayMode: IssueDisplayMode = match[1]
+          ? "expanded"
+          : "compact";
+        const identifier = match[2];
 
-      // FIXED: Replace only the last occurrence to avoid position issues
-      const lastIndex = htmlContent.lastIndexOf(fullMatch);
-      if (lastIndex !== -1) {
-        el.innerHTML =
-          htmlContent.substring(0, lastIndex) +
-          container.outerHTML +
-          htmlContent.substring(lastIndex + fullMatch.length);
+        const container = document.createElement("span");
+        container.className = "linian-inline-issue linian-container";
+        container.setAttribute("data-issue-key", identifier);
+        container.setAttribute("data-display-mode", displayMode);
+
+        const loadingElement = this.renderer!.createLoadingElement(
+          identifier,
+          displayMode
+        );
+        container.appendChild(loadingElement);
+
+        fragment.appendChild(container);
+        lastIndex = regex.lastIndex;
       }
-    }
 
-    // Now process all inline issue containers
-    const inlineIssueTags = el.querySelectorAll("span.linian-inline-issue");
+      if (!hasMatch) {
+        return;
+      }
+
+      const trailingText = sourceText.slice(lastIndex);
+      if (trailingText) {
+        fragment.appendChild(document.createTextNode(trailingText));
+      }
+
+      textNode.parentNode?.replaceChild(fragment, textNode);
+    });
+
+    const inlineIssueTags = el.querySelectorAll(
+      "span.linian-inline-issue:not([data-rendered])"
+    );
     console.log("Found inline issue tags:", inlineIssueTags.length);
 
     for (const container of Array.from(inlineIssueTags)) {
       const issueKey = container.getAttribute("data-issue-key");
+      const displayMode =
+        (container.getAttribute("data-display-mode") as IssueDisplayMode) ||
+        "compact";
       if (issueKey) {
-        console.log(`Fetching issue: ${issueKey}`);
-        this.fetchAndRenderIssue(issueKey, container as HTMLElement);
+        console.log(
+          `Fetching issue: ${issueKey} (displayMode: ${displayMode})`
+        );
+        this.fetchAndRenderIssue(issueKey, container as HTMLElement, displayMode);
       }
     }
   }
   private async fetchAndRenderIssue(
     identifier: string,
-    containerElement: HTMLElement
+    containerElement: HTMLElement,
+    displayMode: IssueDisplayMode
   ): Promise<void> {
     if (!this.apiService || !this.renderer) return;
 
@@ -300,19 +319,31 @@ export default class LinianPlugin extends Plugin {
       console.log("Fetched issue:", issue);
 
       if (issue) {
-        const issueElement = this.renderer.createIssueElement(issue);
+        const issueElement = this.renderer.createIssueElement(
+          issue,
+          displayMode
+        );
         // Use replaceChildren like Jira plugin
         containerElement.replaceChildren(issueElement);
+        containerElement.setAttribute("data-rendered", "true");
         console.log(`Rendered issue: ${identifier}`);
       } else {
-        const errorElement = this.renderer.createErrorElement(identifier);
+        const errorElement = this.renderer.createErrorElement(
+          identifier,
+          displayMode
+        );
         containerElement.replaceChildren(errorElement);
+        containerElement.setAttribute("data-rendered", "true");
         console.log(`Issue not found: ${identifier}`);
       }
     } catch (error) {
       console.error("Error fetching Linear issue:", error);
-      const errorElement = this.renderer.createErrorElement(identifier);
+      const errorElement = this.renderer.createErrorElement(
+        identifier,
+        displayMode
+      );
       containerElement.replaceChildren(errorElement);
+      containerElement.setAttribute("data-rendered", "true");
     }
   }
 }

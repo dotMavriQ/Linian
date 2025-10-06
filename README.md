@@ -16,7 +16,7 @@ Our goal was to match that same level of functionality and user experience, but 
 
 - **Automatic Detection**: Recognizes Linear issue shortcodes in your notes (e.g., `[TEAM-123]`)
 - **Rich Visual Feedback**: Color-coded status indicators that match your issue states
-- **Interactive Tooltips**: Hover to see issue details including title, status, assignee, and description
+- **Inline Issue Cards**: Render compact badges or expanded cards directly in your notes—no hover required
 - **Priority Icons**: Visual priority indicators (🔴 Urgent, 🟠 High, 🟡 Medium, 🔵 Low)
 - **Assignee Avatars**: See who's working on each issue at a glance
 - **Smart Caching**: Efficient caching system to minimize API calls
@@ -75,13 +75,16 @@ Simply type Linear issue identifiers in your notes using square brackets:
 Working on [TEAM-465] and [DESIGN-123] today.
 
 The bug in [ENG-789] is blocking [TEAM-466].
+
+# Need more context?
+[L_TEAM-465] will render the full title and metadata inline, similar to the Jira Issue plugin.
 ```
 
 Linian will automatically:
 - Convert shortcodes to clickable links
 - Add status-based color coding
 - Show priority icons and assignee avatars
-- Display rich tooltips on hover
+- Render expanded summaries when you prefix the shortcode with `L_`
 
 ## Display Options
 
@@ -100,17 +103,9 @@ Issues are color-coded based on their Linear status:
 - 🔵 **Low** (Priority 1)
 - ⚪ **No Priority** (Priority 0)
 
-### Tooltips
-Hover over any issue link to see:
-- Issue title and description
-- Current status and team
-- Assignee information
-- Creation and update dates
-
 ## Configuration
 
 ### Display Settings
-- **Enable Tooltips**: Show detailed information on hover
 - **Show Priority Icons**: Display priority indicators
 - **Show Assignee Avatars**: Show profile pictures
 
@@ -168,10 +163,9 @@ Linian uses the Linear GraphQL API. Make sure your API key has the following per
 ### Slow Performance
 1. Reduce cache timeout
 2. Decrease max cache size
-3. Disable tooltips or avatars if not needed
+3. Disable avatars if not needed
 
-### Issues Not Recognized
-- Ensure shortcodes follow the pattern `[TEAM-123]`
+- Ensure shortcodes follow the pattern `[TEAM-123]` (or `[L_TEAM-123]` for the expanded view)
 - Team keys must be uppercase
 - Issue numbers must be numeric
 

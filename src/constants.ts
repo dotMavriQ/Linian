@@ -1,17 +1,20 @@
 import { LinearSettings } from "./types";
 
 export const DEFAULT_SETTINGS: LinearSettings = {
-  apiKey: "",
-  organizationId: "",
-  defaultTeam: "",
-  enableTooltips: true,
-  enablePriorityIcons: true,
-  enableAssigneeAvatars: true,
-  cacheTimeout: 300000, // 5 minutes
-  maxCacheSize: 1000,
+	apiKey: "",
+	organizationId: "",
+	defaultTeam: "",
+	enablePriorityIcons: true,
+	enableAssigneeAvatars: true,
+	cacheTimeout: 300000, // 5 minutes
+	maxCacheSize: 1000,
 };
 
-export const LINEAR_SHORTCODE_REGEX = /\[([A-Za-z]+(?:-[A-Za-z]*)?-\d+)\]/gi;
+const SHORTCODE_PATTERN = "\\[(L_)?([A-Za-z]+(?:-[A-Za-z]*)?-\\d+)\\]";
+
+export const LINEAR_SHORTCODE_REGEX = new RegExp(SHORTCODE_PATTERN, "gi");
+
+export const createShortcodeRegex = () => new RegExp(SHORTCODE_PATTERN, "gi");
 
 export const GRAPHQL_QUERIES = {
   ISSUE_BY_IDENTIFIER: `

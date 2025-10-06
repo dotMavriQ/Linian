@@ -1,31 +1,37 @@
-import { LinearIssue, LinearSettings } from "./types";
-import { STATUS_COLORS, PRIORITY_ICONS } from "./constants";
+import { IssueDisplayMode, LinearIssue, LinearSettings } from "./types";
+import { PRIORITY_ICONS } from "./constants";
 
 export class LinearRenderer {
   private settings: LinearSettings;
-  private containerEl: HTMLElement;
 
-  constructor(settings: LinearSettings, containerEl: HTMLElement) {
+  constructor(settings: LinearSettings) {
     this.settings = settings;
-    this.containerEl = containerEl;
   }
 
-  createIssueElement(issue: LinearIssue): HTMLElement {
+  createIssueElement(
+    issue: LinearIssue,
+    displayMode: IssueDisplayMode = "compact"
+  ): HTMLElement {
     const issueEl = document.createElement("a");
     issueEl.className = "linian-issue-link";
+    if (displayMode === "expanded") {
+      issueEl.classList.add("linian-issue-link--expanded");
+    }
     issueEl.href = issue.url;
     issueEl.setAttribute(
       "aria-label",
       `Linear issue: ${issue.identifier} - ${issue.title}`
     );
-    issueEl.setAttribute("data-tooltip-position", "top");
 
     // Main content
     const contentEl = document.createElement("span");
     contentEl.className = "linian-issue-content";
 
+    const shouldShowPriorityIcon =
+      this.settings.enablePriorityIcons && issue.priority !== undefined;
+
     // Priority icon
-    if (this.settings.enablePriorityIcons && issue.priority !== undefined) {
+    if (shouldShowPriorityIcon && displayMode === "compact") {
       const priorityEl = document.createElement("span");
       priorityEl.className = "linian-priority-icon";
       priorityEl.textContent =
@@ -46,23 +52,44 @@ export class LinearRenderer {
       contentEl.appendChild(priorityEl);
     }
 
-    // Issue identifier
-    const identifierEl = document.createElement("span");
-    identifierEl.className = "linian-issue-identifier";
-    identifierEl.textContent = issue.identifier;
-    contentEl.appendChild(identifierEl);
+    if (displayMode === "expanded") {
+      const leadingDot = document.createElement("span");
+      leadingDot.className = "linian-expanded-dot linian-expanded-dot--leading";
+      leadingDot.textContent = "●";
+      leadingDot.style.color = issue.state.color;
+      contentEl.appendChild(leadingDot);
 
-    // Status indicator
-    const statusEl = document.createElement("span");
-    statusEl.className = "linian-status-indicator";
-    statusEl.style.backgroundColor = issue.state.color;
-    statusEl.setAttribute("title", issue.state.name);
-    contentEl.appendChild(statusEl);
+      const titleEl = document.createElement("span");
+      titleEl.className = "linian-issue-title";
+      titleEl.textContent = issue.title;
+      contentEl.appendChild(titleEl);
+
+      const trailingDot = document.createElement("span");
+      trailingDot.className =
+        "linian-expanded-dot linian-expanded-dot--trailing";
+      trailingDot.textContent = "•";
+      trailingDot.style.color = issue.state.color;
+      contentEl.appendChild(trailingDot);
+    } else {
+      const identifierEl = document.createElement("span");
+      identifierEl.className = "linian-issue-identifier";
+      identifierEl.textContent = issue.identifier;
+      contentEl.appendChild(identifierEl);
+
+      const statusEl = document.createElement("span");
+      statusEl.className = "linian-status-indicator";
+      statusEl.style.backgroundColor = issue.state.color;
+      statusEl.setAttribute("title", issue.state.name);
+      contentEl.appendChild(statusEl);
+    }
 
     issueEl.appendChild(contentEl);
 
-    // Assignee avatar
-    if (this.settings.enableAssigneeAvatars && issue.assignee?.avatarUrl) {
+    if (
+      displayMode === "compact" &&
+      this.settings.enableAssigneeAvatars &&
+      issue.assignee?.avatarUrl
+    ) {
       const avatarEl = document.createElement("img");
       avatarEl.className = "linian-assignee-avatar";
       avatarEl.src = issue.assignee.avatarUrl;
@@ -71,34 +98,49 @@ export class LinearRenderer {
       issueEl.appendChild(avatarEl);
     }
 
-    // Add tooltip
-    if (this.settings.enableTooltips) {
-      this.addTooltip(issueEl, issue);
+    if (displayMode === "expanded") {
+      this.attachTooltip(issueEl, issue);
     }
 
     return issueEl;
   }
 
-  createLoadingElement(identifier: string): HTMLElement {
+  createLoadingElement(
+    identifier: string,
+    displayMode: IssueDisplayMode = "compact"
+  ): HTMLElement {
     const loadingEl = document.createElement("span");
     loadingEl.className = "linian-loading";
-    loadingEl.textContent = identifier;
+    if (displayMode === "expanded") {
+      loadingEl.classList.add("linian-loading--expanded");
+      loadingEl.textContent = "Loading issue...";
+    } else {
+      loadingEl.textContent = identifier;
+    }
     loadingEl.setAttribute("title", "Loading Linear issue...");
     return loadingEl;
   }
 
-  createErrorElement(identifier: string): HTMLElement {
+  createErrorElement(
+    identifier: string,
+    displayMode: IssueDisplayMode = "compact"
+  ): HTMLElement {
     const errorEl = document.createElement("span");
     errorEl.className = "linian-error";
-    errorEl.textContent = identifier;
+    if (displayMode === "expanded") {
+      errorEl.classList.add("linian-error--expanded");
+      errorEl.textContent = "Failed to load issue";
+    } else {
+      errorEl.textContent = identifier;
+    }
     errorEl.setAttribute("title", "Failed to load Linear issue");
     return errorEl;
   }
 
-  private addTooltip(element: HTMLElement, issue: LinearIssue): void {
+  private attachTooltip(element: HTMLElement, issue: LinearIssue): void {
     let tooltipEl: HTMLElement | null = null;
 
-    const showTooltip = (event: MouseEvent) => {
+    const showTooltip = () => {
       if (tooltipEl) return;
 
       tooltipEl = document.createElement("div");
@@ -107,43 +149,43 @@ export class LinearRenderer {
       const titleEl = document.createElement("div");
       titleEl.className = "linian-tooltip-title";
       titleEl.textContent = issue.title;
+      tooltipEl.appendChild(titleEl);
 
       const metaEl = document.createElement("div");
       metaEl.className = "linian-tooltip-meta";
       metaEl.innerHTML = `
-				<span class="linian-tooltip-status" style="background-color: ${
-          issue.state.color
-        }">
-					${issue.state.name}
-				</span>
-				<span class="linian-tooltip-team">${issue.team.name}</span>
-				${
+        <span class="linian-tooltip-status" style="background-color: ${issue.state.color}">
+          ${issue.state.name}
+        </span>
+        <span class="linian-tooltip-team">${issue.team.name}</span>
+        ${
           issue.assignee
             ? `<span class="linian-tooltip-assignee">@${issue.assignee.name}</span>`
             : ""
         }
-			`;
-
-      // Add title and meta first
-      tooltipEl.appendChild(titleEl);
+      `;
       tooltipEl.appendChild(metaEl);
 
-      // Add description last (proper UX order)
+      const idEl = document.createElement("div");
+      idEl.className = "linian-tooltip-identifier";
+      idEl.textContent = issue.identifier;
+      tooltipEl.appendChild(idEl);
+
       if (issue.description) {
         const descEl = document.createElement("div");
         descEl.className = "linian-tooltip-description";
+        const trimmed = issue.description.replace(/\s+/g, " ");
+        const preview = trimmed.slice(0, 260);
         descEl.textContent =
-          issue.description.slice(0, 200) +
-          (issue.description.length > 200 ? "..." : "");
+          preview + (trimmed.length > preview.length ? "…" : "");
         tooltipEl.appendChild(descEl);
       }
 
-      // Position tooltip
       const rect = element.getBoundingClientRect();
-      tooltipEl.style.position = "absolute";
-      tooltipEl.style.top = `${rect.top - 10}px`;
+      tooltipEl.style.position = "fixed";
+      tooltipEl.style.top = `${rect.bottom + 8}px`;
       tooltipEl.style.left = `${rect.left}px`;
-      tooltipEl.style.transform = "translateY(-100%)";
+      tooltipEl.style.maxWidth = "360px";
       tooltipEl.style.zIndex = "1000";
 
       document.body.appendChild(tooltipEl);
@@ -151,7 +193,7 @@ export class LinearRenderer {
 
     const hideTooltip = () => {
       if (tooltipEl) {
-        document.body.removeChild(tooltipEl);
+        tooltipEl.remove();
         tooltipEl = null;
       }
     };
