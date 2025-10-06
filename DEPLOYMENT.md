@@ -178,6 +178,17 @@ When ready to publish:
 4. Package files for distribution
 5. Submit to Obsidian Community Plugins (if desired)
 
+### Automated Release Pipeline
+
+- Pushing a version bump to the `main` branch automatically runs the **Build & Release Obsidian Plugin** workflow.
+- The workflow:
+	1. Builds the plugin from source
+	2. Packages a BRAT-compliant zip (`linian-{version}.zip`) containing a `linian/` folder with all runtime files
+	3. Updates the `release` branch with the fresh runtime files
+	4. Creates a GitHub Release tagged with the version from `manifest.json`
+	5. Attaches both the zip archive and the individual files to the release
+- To trigger a new release, bump the version in `manifest.json` (and `versions.json` when needed) and push to `main`; the workflow skips automatically if a release tag already exists for that version.
+
 ## Support
 
 If you encounter issues:

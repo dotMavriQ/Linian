@@ -1,105 +1,196 @@
-name: Release Obsidian Plugin
+name: Build & Release Obsidian Plugin
 
 on:
   push:
     branches:
       - main
-    tags:
-      - "*"
+  workflow_dispatch:
 
-env:
-  PLUGIN_NAME: linian
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # Deploy to release branch on every push to main
-  deploy-release-branch:
-    if: github.ref == 'refs/heads/main'
+  release:
     runs-on: ubuntu-latest
-
+    env:
+      RELEASE_NOTES_PATH: ""
+      RELEASE_FILES: ""
+      RELEASE_FILES_DIR: ""
+      ZIP_PATH: ""
+      HAS_VERSIONS: "false"
+      RELEASE_COMMIT: ""
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Use Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
+          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build plugin
-        run: npm run build
-
-      - name: Create release folder structure
+      - name: Read plugin metadata
+        id: meta
+        shell: bash
         run: |
-          mkdir -p release-temp/${{ env.PLUGIN_NAME }}
-          cp main.js manifest.json styles.css release-temp/${{ env.PLUGIN_NAME }}/
-          if [ -f "versions.json" ]; then
-            cp versions.json release-temp/${{ env.PLUGIN_NAME }}/
+          VERSION=$(node -p "require('./manifest.json').version")
+          ID=$(node -p "require('./manifest.json').id")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check_tag
+        shell: bash
+        run: |
+          git fetch --tags --force
+          if git rev-parse "refs/tags/${{ steps.meta.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy to release branch
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: release
-          publish_dir: ./release-temp
-          force_orphan: true
-          commit_message: "Deploy built plugin files for ${{ github.sha }}"
-
-  # Create GitHub Release on tag push
-  create-github-release:
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
+      - name: Skip release (tag already exists)
+        if: steps.check_tag.outputs.exists == 'true'
+        run: echo "Tag ${{ steps.meta.outputs.version }} already exists — skipping release pipeline."
 
       - name: Install dependencies
+        if: steps.check_tag.outputs.exists == 'false'
         run: npm ci
 
-      - name: Build plugin
+      - name: Build plugin bundle
+        if: steps.check_tag.outputs.exists == 'false'
         run: npm run build
 
-      - name: Create release assets
+      - name: Assemble release folder (BRAT structure)
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: bash
         run: |
-          # Create zip with files directly in root (correct Obsidian plugin structure)
-          zip ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip main.js manifest.json styles.css versions.json
+          set -euo pipefail
+          mkdir -p dist/${{ steps.meta.outputs.id }}
+          cp main.js dist/${{ steps.meta.outputs.id }}/
+          cp manifest.json dist/${{ steps.meta.outputs.id }}/
+          cp styles.css dist/${{ steps.meta.outputs.id }}/
+          if [ -f "versions.json" ]; then
+            cp versions.json dist/${{ steps.meta.outputs.id }}/
+          fi
+          cd dist
+          zip -r "${{ steps.meta.outputs.id }}-${{ steps.meta.outputs.version }}.zip" "${{ steps.meta.outputs.id }}"
+          echo "ZIP_PATH=$PWD/${{ steps.meta.outputs.id }}-${{ steps.meta.outputs.version }}.zip" >> $GITHUB_ENV
+          cd ..
 
-      - name: Create Release
+      - name: Extract release notes from changelog
+        if: steps.check_tag.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'EOF' > dist/release-notes.md
+            const fs = require('fs');
+            const version = process.env.VERSION;
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`## \\[${escape(version)}\\][\\s\\S]*?(?=^## \\[|$)`, 'm');
+            const match = changelog.match(pattern);
+            if (!match) {
+              console.error(`Could not find changelog entry for version ${version}`);
+              process.exit(1);
+            }
+            process.stdout.write(match[0].trim() + '\n');
+          EOF
+          echo "RELEASE_NOTES_PATH=$(pwd)/dist/release-notes.md" >> $GITHUB_ENV
+
+      - name: Stage artifacts for downstream steps
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/plugin-files"
+          cp dist/${{ steps.meta.outputs.id }}/main.js "$RUNNER_TEMP/plugin-files/"
+          cp dist/${{ steps.meta.outputs.id }}/manifest.json "$RUNNER_TEMP/plugin-files/"
+          cp dist/${{ steps.meta.outputs.id }}/styles.css "$RUNNER_TEMP/plugin-files/"
+          if [ -f dist/${{ steps.meta.outputs.id }}/versions.json ]; then
+            cp dist/${{ steps.meta.outputs.id }}/versions.json "$RUNNER_TEMP/plugin-files/"
+            echo "HAS_VERSIONS=true" >> $GITHUB_ENV
+          else
+            echo "HAS_VERSIONS=false" >> $GITHUB_ENV
+          fi
+          cp "$ZIP_PATH" "$RUNNER_TEMP/"
+          echo "ZIP_PATH=$RUNNER_TEMP/${{ steps.meta.outputs.id }}-${{ steps.meta.outputs.version }}.zip" >> $GITHUB_ENV
+          echo "RELEASE_FILES_DIR=$RUNNER_TEMP/plugin-files" >> $GITHUB_ENV
+          echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Update release branch
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          ORIG_REF=$(git rev-parse --abbrev-ref HEAD)
+          git fetch origin release || true
+          if git show-ref --verify --quiet refs/remotes/origin/release; then
+            git checkout -B release origin/release
+          else
+            git checkout -B release
+          fi
+          rm -rf *
+          cp "$RELEASE_FILES_DIR"/main.js .
+          cp "$RELEASE_FILES_DIR"/manifest.json .
+          cp "$RELEASE_FILES_DIR"/styles.css .
+          if [ "$HAS_VERSIONS" = "true" ]; then
+            cp "$RELEASE_FILES_DIR"/versions.json .
+          else
+            rm -f versions.json || true
+          fi
+          git add main.js manifest.json styles.css
+          if [ "$HAS_VERSIONS" = "true" ]; then
+            git add versions.json
+          fi
+          if git diff --staged --quiet; then
+            echo "No release branch changes to commit"
+          else
+            git commit -m "Deploy built plugin files for v${{ steps.meta.outputs.version }}\n\nGenerated from commit: $RELEASE_COMMIT"
+            git push origin release --force
+          fi
+          git checkout "$ORIG_REF"
+          git reset --hard "$RELEASE_COMMIT"
+
+      - name: Prepare asset list
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE_LIST="$ZIP_PATH"$'\n'$RELEASE_FILES_DIR/main.js$'\n'$RELEASE_FILES_DIR/manifest.json$'\n'$RELEASE_FILES_DIR/styles.css
+          if [ "$HAS_VERSIONS" = "true" ]; then
+            FILE_LIST+=$'\n'$RELEASE_FILES_DIR/versions.json
+          fi
+          {
+            echo "RELEASE_FILES<<'EOF'"
+            echo "$FILE_LIST"
+            echo EOF
+          } >> $GITHUB_ENV
+
+      - name: Create GitHub release
+        if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Linian v${{ github.ref_name }}"
-          body: |
-            ## Linian Obsidian Plugin v${{ github.ref_name }}
-
-            ### Installation
-
-            **Option 1: Download Plugin Folder (Recommended)**
-            1. Download `${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip`
-            2. Extract the zip file
-            3. Copy the `${{ env.PLUGIN_NAME }}` folder to your vault's `.obsidian/plugins/` directory
-            4. Enable the plugin in Obsidian Settings → Community Plugins
-
-            **Option 2: Manual Installation**
-            1. Download `main.js`, `manifest.json`, and `styles.css`
-            2. Create a folder named `${{ env.PLUGIN_NAME }}` in your vault's `.obsidian/plugins/` directory
-            3. Place the downloaded files in that folder
-            4. Enable the plugin in Obsidian Settings → Community Plugins
-
+          tag_name: ${{ steps.meta.outputs.version }}
+          name: Linian v${{ steps.meta.outputs.version }}
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
+          files: ${{ env.RELEASE_FILES }}
           draft: false
           prerelease: false
-          files: |
-            ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip
-            main.js
-            manifest.json
-            styles.css
-            versions.json
+
+      - name: Upload release bundle artifact
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linian-${{ steps.meta.outputs.version }}
+          path: ${{ env.RELEASE_FILES }}
