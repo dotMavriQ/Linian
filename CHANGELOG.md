@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes yet._
 
+## [1.2.0] - 2026-07-04
+
+### Fixed
+
+- Duplicate hover tooltips and repeating hover-info on Linear shortcodes (#1, #2). Rendering is now cache-first and idempotent, so a shortcode paints once and never stacks tooltips.
+
+### Added
+
+- **Persistent offline cache.** Issue snapshots are written to disk and reloaded on startup, so notes paint instantly from cache and keep working offline. Cache size is capped (`maxCacheSize`, default 1000) with oldest-entry eviction.
+- **Stale-while-revalidate auto-refresh.** New `autoRefresh` setting revalidates issues in the background after they go stale (`staleAfterMs`, default 6 hours), with a once-per-session dedup guard so repeated re-renders never hammer the Linear API.
+- **Richer issue cards** including priority labels and comment counts.
+
+### Changed
+
+- Rendering pipeline extracted into dedicated `cache`, `card`, and `issue-controller` modules; net ~400 fewer lines with clearer separation of concerns.
+- Identifiers are normalized (upper-cased) to a canonical cache key to match Linear's case-sensitive filtering.
+
+### Removed
+
+- Obsolete `organizationId`, `defaultTeam`, and `cacheTimeout` settings (superseded by `staleAfterMs`).
+
 ## [1.1.1] - 2025-10-06
 
 ### Changed

@@ -96,7 +96,7 @@ jobs:
             const version = process.env.VERSION;
             const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
             const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const pattern = new RegExp(`## \\[${escape(version)}\\][\\s\\S]*?(?=^## \\[|$)`, 'm');
+            const pattern = new RegExp(`## \\[${escape(version)}\\][\\s\\S]*?(?=\\n## \\[|$)`);
             const match = changelog.match(pattern);
             if (!match) {
               console.error(`Could not find changelog entry for version ${version}`);

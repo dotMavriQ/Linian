@@ -21,6 +21,8 @@ export interface LinearIssue {
     name: string;
     key: string;
   };
+  /** Number of comments on the issue at fetch time. */
+  commentCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,17 +31,33 @@ export type IssueDisplayMode = "compact" | "expanded";
 
 export interface LinearSettings {
   apiKey: string;
-  organizationId?: string;
-  defaultTeam?: string;
   enablePriorityIcons: boolean;
   enableAssigneeAvatars: boolean;
-  cacheTimeout: number;
   maxCacheSize: number;
+  /** Automatically revalidate cached issues in the background when they age. */
+  autoRefresh: boolean;
+  /** How long a cached snapshot stays "fresh" before a background refresh (ms). */
+  staleAfterMs: number;
 }
 
-export interface IssueCache {
-  [key: string]: {
-    issue: LinearIssue;
-    timestamp: number;
-  };
+/** Freshness of a cached snapshot relative to the live Linear data. */
+export type CacheStatus =
+  | "fresh" // last fetch succeeded
+  | "unreachable" // last refresh failed (offline / network)
+  | "inaccessible"; // Linear returned no issue (deleted or access revoked)
+
+/** A persisted snapshot of an issue plus the metadata needed for SWR. */
+export interface CachedIssue {
+  issue: LinearIssue;
+  /** Timestamp of the last successful retrieval of `issue`. */
+  fetchedAt: number;
+  /** Timestamp of the last revalidation attempt (success or failure). */
+  lastAttempt: number;
+  status: CacheStatus;
+}
+
+/** On-disk shape of the issue cache. */
+export interface PersistedCache {
+  version: 1;
+  entries: Record<string, CachedIssue>;
 }

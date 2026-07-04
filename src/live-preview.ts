@@ -11,14 +11,9 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { editorLivePreviewField } from "obsidian";
-import { LinearAPIService } from "./api";
-import { LinearRenderer } from "./renderer";
-import { IssueDisplayMode, LinearIssue } from "./types";
+import { IssueController } from "./issue-controller";
+import { IssueDisplayMode } from "./types";
 import { LINEAR_SHORTCODE_REGEX } from "./constants";
-
-interface IMatchDecoratorRef {
-  ref: MatchDecorator | null;
-}
 
 const isEditorInLivePreviewMode = (view: EditorView) =>
   view.state.field(editorLivePreviewField as unknown as StateField<boolean>);
@@ -39,104 +34,42 @@ const isSelectionContainsTag = (
 };
 
 class LinearIssueWidget extends WidgetType {
-  private _issueKey: string;
-  private _displayMode: IssueDisplayMode;
-  private _htmlContainer: HTMLElement;
-  private _apiService: LinearAPIService;
-  private _renderer: LinearRenderer;
-  private _destroyed: boolean = false;
+  private _container: HTMLElement;
 
   constructor(
-    key: string,
-    apiService: LinearAPIService,
-    renderer: LinearRenderer,
-    displayMode: IssueDisplayMode
+    private key: string,
+    private controller: IssueController,
+    private displayMode: IssueDisplayMode
   ) {
     super();
-    this._issueKey = key;
-    this._apiService = apiService;
-    this._renderer = renderer;
-    this._displayMode = displayMode;
-    this._htmlContainer = document.createElement("span");
-    this._htmlContainer.className = "linian-inline-issue linian-container";
-    this.buildTag();
+    this._container = document.createElement("span");
+    this._container.className = "linian-inline-issue linian-container";
+    // Cache-first render: paints instantly from disk, revalidates in the
+    // background per the controller's SWR policy.
+    this.controller.render(this._container, this.key, this.displayMode);
   }
 
-  buildTag() {
-    // Check if destroyed to prevent memory leaks
-    if (this._destroyed) return;
-
-    // Show loading initially
-    const loadingElement = this._renderer.createLoadingElement(
-      this._issueKey,
-      this._displayMode
-    );
-    this._htmlContainer.replaceChildren(loadingElement);
-
-    // Fetch issue data with timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("API timeout")), 10000)
-    );
-
-    Promise.race([this._apiService.getIssue(this._issueKey), timeoutPromise])
-      .then((result) => {
-        if (this._destroyed) return; // Don't update if destroyed
-
-        const issue = result as LinearIssue | null;
-        if (issue) {
-          const issueElement = this._renderer.createIssueElement(
-            issue,
-            this._displayMode
-          );
-          this._htmlContainer.replaceChildren(issueElement);
-        } else {
-          const errorElement = this._renderer.createErrorElement(
-            this._issueKey,
-            this._displayMode
-          );
-          this._htmlContainer.replaceChildren(errorElement);
-        }
-      })
-      .catch((error) => {
-        if (this._destroyed) return; // Don't update if destroyed
-
-        console.error("Error fetching Linear issue:", error);
-        const errorElement = this._renderer.createErrorElement(
-          this._issueKey,
-          this._displayMode
-        );
-        this._htmlContainer.replaceChildren(errorElement);
-      });
+  eq(other: LinearIssueWidget): boolean {
+    return other.key === this.key && other.displayMode === this.displayMode;
   }
 
-  toDOM(view: EditorView): HTMLElement {
-    return this._htmlContainer;
+  toDOM(): HTMLElement {
+    return this._container;
   }
 
-  destroy() {
-    this._destroyed = true;
-    // Clean up DOM references
-    this._htmlContainer.replaceChildren();
+  destroy(): void {
+    this._container.replaceChildren();
   }
 }
 
-// Global variable with the match decorator
-let linearMatchDecorator: IMatchDecoratorRef = { ref: null };
-
-function buildMatchDecorator(
-  apiService: LinearAPIService,
-  renderer: LinearRenderer
-) {
-  linearMatchDecorator.ref = new MatchDecorator({
+function buildMatchDecorator(controller: IssueController): MatchDecorator {
+  return new MatchDecorator({
     regexp: LINEAR_SHORTCODE_REGEX,
     decoration: (match: RegExpExecArray, view: EditorView, pos: number) => {
-      const displayMode: IssueDisplayMode = match[1]
-        ? "expanded"
-        : "compact";
+      const displayMode: IssueDisplayMode = match[1] ? "expanded" : "compact";
       const key = match[2];
       const tagLength = match[0].length;
 
-      // Don't replace if cursor is inside the tag or selection contains it
       if (
         !isEditorInLivePreviewMode(view) ||
         isCursorInsideTag(view, pos, tagLength) ||
@@ -146,28 +79,20 @@ function buildMatchDecorator(
           tagName: "span",
           class: "linian-shortcode-highlight",
         });
-      } else {
-        return Decoration.replace({
-          widget: new LinearIssueWidget(
-            key,
-            apiService,
-            renderer,
-            displayMode
-          ),
-        });
       }
+      return Decoration.replace({
+        widget: new LinearIssueWidget(key, controller, displayMode),
+      });
     },
   });
 }
 
-function buildViewPluginClass(matchDecorator: IMatchDecoratorRef) {
+function buildViewPlugin(decorator: MatchDecorator): ViewPlugin<PluginValue> {
   class ViewPluginClass implements PluginValue {
     decorators: DecorationSet;
 
     constructor(view: EditorView) {
-      this.decorators = matchDecorator.ref
-        ? matchDecorator.ref.createDeco(view)
-        : RangeSet.empty;
+      this.decorators = decorator.createDeco(view);
     }
 
     update(update: ViewUpdate): void {
@@ -184,9 +109,7 @@ function buildViewPluginClass(matchDecorator: IMatchDecoratorRef) {
         update.startState.selection.main !== update.state.selection.main ||
         editorModeChanged
       ) {
-        this.decorators = matchDecorator.ref
-          ? matchDecorator.ref.createDeco(update.view)
-          : RangeSet.empty;
+        this.decorators = decorator.createDeco(update.view);
       }
     }
 
@@ -195,43 +118,20 @@ function buildViewPluginClass(matchDecorator: IMatchDecoratorRef) {
     }
   }
 
-  const ViewPluginSpec: PluginSpec<ViewPluginClass> = {
+  const spec: PluginSpec<ViewPluginClass> = {
     decorations: (viewPlugin) => viewPlugin.decorators,
   };
-
-  return {
-    class: ViewPluginClass,
-    spec: ViewPluginSpec,
-  };
+  return ViewPlugin.fromClass(ViewPluginClass, spec);
 }
 
 export class LinearViewPluginManager {
-  private _viewPlugin: ViewPlugin<PluginValue>;
-  private _apiService: LinearAPIService | null = null;
-  private _renderer: LinearRenderer | null = null;
+  private _viewPlugin: ViewPlugin<PluginValue> | null = null;
 
-  constructor() {
-    this.update();
+  setController(controller: IssueController) {
+    this._viewPlugin = buildViewPlugin(buildMatchDecorator(controller));
   }
 
-  setServices(apiService: LinearAPIService, renderer: LinearRenderer) {
-    this._apiService = apiService;
-    this._renderer = renderer;
-    this.update();
-  }
-
-  update() {
-    if (this._apiService && this._renderer) {
-      buildMatchDecorator(this._apiService, this._renderer);
-      const viewPluginClass = buildViewPluginClass(linearMatchDecorator);
-      this._viewPlugin = ViewPlugin.fromClass(
-        viewPluginClass.class,
-        viewPluginClass.spec
-      );
-    }
-  }
-
-  getViewPlugin(): ViewPlugin<any> | null {
-    return this._viewPlugin || null;
+  getViewPlugin(): ViewPlugin<PluginValue> | null {
+    return this._viewPlugin;
   }
 }

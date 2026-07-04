@@ -1,152 +1,113 @@
-import { LinearIssue, IssueCache } from "./types";
-import { GRAPHQL_QUERIES } from "./constants";
+import { requestUrl } from "obsidian";
+import { LinearIssue } from "./types";
+import { GRAPHQL_QUERIES, normalizeIdentifier } from "./constants";
 
-// Simple GraphQL client implementation
-class SimpleGraphQLClient {
-  private endpoint: string;
-  private headers: Record<string, string>;
+const LINEAR_ENDPOINT = "https://api.linear.app/graphql";
 
-  constructor(endpoint: string, headers: Record<string, string>) {
-    this.endpoint = endpoint;
-    this.headers = headers;
-  }
-
-  async request<T>(query: string, variables: any = {}): Promise<T> {
-    console.log("Making GraphQL request to Linear API");
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...this.headers,
-      },
-      body: JSON.stringify({
-        query,
-        variables,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.errors) {
-      throw new Error(
-        `GraphQL error: ${data.errors.map((e: any) => e.message).join(", ")}`
-      );
-    }
-
-    return data.data;
-  }
-}
+/**
+ * Outcome of a live fetch. `unreachable` means we could not talk to Linear
+ * (offline / network / auth) and any cached snapshot should be kept as-is.
+ * `not-found` means Linear responded but the issue is gone or no longer
+ * visible (deleted / access revoked) — the snapshot is also kept.
+ */
+export type FetchResult =
+  | { status: "ok"; issue: LinearIssue }
+  | { status: "not-found" }
+  | { status: "unreachable" };
 
 export class LinearAPIService {
-  private client: SimpleGraphQLClient;
-  private cache: IssueCache = {};
-  private cacheTimeout: number;
-  private maxCacheSize: number;
+  private apiKey: string;
 
-  constructor(
-    apiKey: string,
-    cacheTimeout: number = 300000,
-    maxCacheSize: number = 1000
-  ) {
-    this.client = new SimpleGraphQLClient("https://api.linear.app/graphql", {
-      Authorization: apiKey, // Fixed: Capital 'A' and direct key usage per Linear docs
-    });
-    this.cacheTimeout = cacheTimeout;
-    this.maxCacheSize = maxCacheSize;
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
   }
 
   updateApiKey(apiKey: string): void {
-    this.client = new SimpleGraphQLClient("https://api.linear.app/graphql", {
-      Authorization: apiKey, // Fixed: Capital 'A' and direct key usage per Linear docs
-    });
+    this.apiKey = apiKey;
   }
 
-  async getIssue(identifier: string): Promise<LinearIssue | null> {
-    console.log(`Getting issue: ${identifier}`);
+  /**
+   * Fetch a single issue by identifier. Uses Obsidian's `requestUrl` so the
+   * request runs in the main process — no CORS/CSP restrictions, works on
+   * mobile.
+   */
+  async fetchIssue(identifier: string): Promise<FetchResult> {
+    const match = normalizeIdentifier(identifier).match(/^([A-Z]+)-(\d+)$/);
+    if (!match) return { status: "not-found" };
 
-    // Check cache first
-    const cached = this.cache[identifier];
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      console.log(`Returning cached issue: ${identifier}`);
-      return cached.issue;
-    }
+    const teamKey = match[1];
+    const number = parseInt(match[2], 10);
 
+    let response;
     try {
-      console.log(`Fetching issue from API: ${identifier}`);
-
-      // Parse identifier like "TEAM-474" into team "TEAM" and number 474
-      const match = identifier.match(/^([A-Za-z]+)-(\d+)$/);
-      if (!match) {
-        console.error(`Invalid identifier format: ${identifier}`);
-        return null;
-      }
-
-      const [, teamKey, numberStr] = match;
-      const number = parseInt(numberStr, 10);
-
-      console.log(`Searching for team: ${teamKey}, number: ${number}`);
-
-      const response = await this.client.request<{
-        issues: { nodes: LinearIssue[] };
-      }>(GRAPHQL_QUERIES.ISSUE_BY_IDENTIFIER, { teamKey, number });
-
-      console.log("API Response:", response);
-
-      if (response.issues?.nodes?.length > 0) {
-        const issue = response.issues.nodes[0];
-        // Update cache
-        this.updateCache(identifier, issue);
-        return issue;
-      }
-
-      console.log(`No issue found for ${identifier}`);
-      return null;
-    } catch (error) {
-      console.error("Error fetching Linear issue:", error);
-      return null;
+      response = await requestUrl({
+        url: LINEAR_ENDPOINT,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: this.apiKey,
+        },
+        body: JSON.stringify({
+          query: GRAPHQL_QUERIES.ISSUE_BY_IDENTIFIER,
+          variables: { teamKey, number },
+        }),
+        throw: false,
+      });
+    } catch {
+      // Network failure / offline.
+      return { status: "unreachable" };
     }
+
+    if (response.status < 200 || response.status >= 300) {
+      // Auth failure or server error — treat as transient, keep any cache.
+      return { status: "unreachable" };
+    }
+
+    const payload = response.json as {
+      data?: {
+        issues?: {
+          nodes?: Array<LinearIssue & { comments?: { nodes?: unknown[] } }>;
+        };
+      };
+      errors?: unknown;
+    };
+
+    if (payload.errors) {
+      return { status: "unreachable" };
+    }
+
+    const node = payload.data?.issues?.nodes?.[0];
+    if (node) {
+      // Collapse the comment list to a count and drop it to keep the cache lean.
+      const { comments, ...issue } = node;
+      issue.commentCount = comments?.nodes?.length ?? 0;
+      return { status: "ok", issue };
+    }
+
+    // Responded cleanly but the issue is not visible to this key anymore.
+    return { status: "not-found" };
   }
 
+  /** Used by the settings "Test Connection" button. */
   async getTeams(): Promise<Array<{ id: string; name: string; key: string }>> {
     try {
-      const response = await this.client.request<{
-        teams: { nodes: Array<{ id: string; name: string; key: string }> };
-      }>(GRAPHQL_QUERIES.ORGANIZATION_TEAMS);
-
-      return response.teams.nodes;
-    } catch (error) {
-      console.error("Error fetching Linear teams:", error);
+      const response = await requestUrl({
+        url: LINEAR_ENDPOINT,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: this.apiKey,
+        },
+        body: JSON.stringify({ query: GRAPHQL_QUERIES.ORGANIZATION_TEAMS }),
+        throw: false,
+      });
+      if (response.status < 200 || response.status >= 300) return [];
+      const payload = response.json as {
+        data?: { teams?: { nodes?: Array<{ id: string; name: string; key: string }> } };
+      };
+      return payload.data?.teams?.nodes ?? [];
+    } catch {
       return [];
     }
-  }
-
-  private updateCache(identifier: string, issue: LinearIssue): void {
-    // Remove oldest entries if cache is full
-    if (Object.keys(this.cache).length >= this.maxCacheSize) {
-      const oldestKey = Object.keys(this.cache).sort(
-        (a, b) => this.cache[a].timestamp - this.cache[b].timestamp
-      )[0];
-      delete this.cache[oldestKey];
-    }
-
-    this.cache[identifier] = {
-      issue,
-      timestamp: Date.now(),
-    };
-  }
-
-  clearCache(): void {
-    this.cache = {};
-  }
-
-  getCacheStats(): { size: number; maxSize: number } {
-    return {
-      size: Object.keys(this.cache).length,
-      maxSize: this.maxCacheSize,
-    };
   }
 }

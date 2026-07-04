@@ -1,5 +1,5 @@
-import { IssueDisplayMode, LinearIssue, LinearSettings } from "./types";
-import { PRIORITY_ICONS } from "./constants";
+import { CachedIssue, IssueDisplayMode, LinearSettings } from "./types";
+import { PRIORITY_ICONS, PRIORITY_LABELS } from "./constants";
 
 export class LinearRenderer {
   private settings: LinearSettings;
@@ -8,14 +8,23 @@ export class LinearRenderer {
     this.settings = settings;
   }
 
+  updateSettings(settings: LinearSettings): void {
+    this.settings = settings;
+  }
+
+  /** Build the inline issue link from a cached snapshot. */
   createIssueElement(
-    issue: LinearIssue,
+    entry: CachedIssue,
     displayMode: IssueDisplayMode = "compact"
-  ): HTMLElement {
+  ): HTMLAnchorElement {
+    const { issue } = entry;
     const issueEl = document.createElement("a");
     issueEl.className = "linian-issue-link";
     if (displayMode === "expanded") {
       issueEl.classList.add("linian-issue-link--expanded");
+    }
+    if (entry.status !== "fresh") {
+      issueEl.classList.add("linian-issue-link--cached");
     }
     issueEl.href = issue.url;
     issueEl.setAttribute(
@@ -23,31 +32,20 @@ export class LinearRenderer {
       `Linear issue: ${issue.identifier} - ${issue.title}`
     );
 
-    // Main content
     const contentEl = document.createElement("span");
     contentEl.className = "linian-issue-content";
 
-    const shouldShowPriorityIcon =
+    const showPriority =
       this.settings.enablePriorityIcons && issue.priority !== undefined;
 
-    // Priority icon
-    if (shouldShowPriorityIcon && displayMode === "compact") {
+    if (showPriority && displayMode === "compact") {
       const priorityEl = document.createElement("span");
       priorityEl.className = "linian-priority-icon";
       priorityEl.textContent =
-        PRIORITY_ICONS[issue.priority] || PRIORITY_ICONS[0];
-      // Create priority label based on the number
-      const priorityLabels = {
-        0: "No priority",
-        1: "Low",
-        2: "Medium",
-        3: "High",
-        4: "Urgent",
-      };
+        PRIORITY_ICONS[issue.priority as number] || PRIORITY_ICONS[0];
       priorityEl.setAttribute(
         "title",
-        priorityLabels[issue.priority as keyof typeof priorityLabels] ||
-          "No priority"
+        PRIORITY_LABELS[issue.priority as number] || PRIORITY_LABELS[0]
       );
       contentEl.appendChild(priorityEl);
     }
@@ -98,10 +96,6 @@ export class LinearRenderer {
       issueEl.appendChild(avatarEl);
     }
 
-    if (displayMode === "expanded") {
-      this.attachTooltip(issueEl, issue);
-    }
-
     return issueEl;
   }
 
@@ -113,97 +107,29 @@ export class LinearRenderer {
     loadingEl.className = "linian-loading";
     if (displayMode === "expanded") {
       loadingEl.classList.add("linian-loading--expanded");
-      loadingEl.textContent = "Loading issue...";
+      loadingEl.textContent = "Loading issue…";
     } else {
       loadingEl.textContent = identifier;
     }
-    loadingEl.setAttribute("title", "Loading Linear issue...");
+    loadingEl.setAttribute("title", "Loading Linear issue…");
     return loadingEl;
   }
 
-  createErrorElement(
+  /** Shown only when there is no cached snapshot and Linear is unreachable. */
+  createUnavailableElement(
     identifier: string,
     displayMode: IssueDisplayMode = "compact"
   ): HTMLElement {
-    const errorEl = document.createElement("span");
-    errorEl.className = "linian-error";
+    const el = document.createElement("span");
+    el.className = "linian-unavailable";
     if (displayMode === "expanded") {
-      errorEl.classList.add("linian-error--expanded");
-      errorEl.textContent = "Failed to load issue";
-    } else {
-      errorEl.textContent = identifier;
+      el.classList.add("linian-unavailable--expanded");
     }
-    errorEl.setAttribute("title", "Failed to load Linear issue");
-    return errorEl;
-  }
-
-  private attachTooltip(element: HTMLElement, issue: LinearIssue): void {
-    let tooltipEl: HTMLElement | null = null;
-
-    const showTooltip = () => {
-      if (tooltipEl) return;
-
-      tooltipEl = document.createElement("div");
-      tooltipEl.className = "linian-tooltip";
-
-      const titleEl = document.createElement("div");
-      titleEl.className = "linian-tooltip-title";
-      titleEl.textContent = issue.title;
-      tooltipEl.appendChild(titleEl);
-
-      const metaEl = document.createElement("div");
-      metaEl.className = "linian-tooltip-meta";
-      metaEl.innerHTML = `
-        <span class="linian-tooltip-status" style="background-color: ${issue.state.color}">
-          ${issue.state.name}
-        </span>
-        <span class="linian-tooltip-team">${issue.team.name}</span>
-        ${
-          issue.assignee
-            ? `<span class="linian-tooltip-assignee">@${issue.assignee.name}</span>`
-            : ""
-        }
-      `;
-      tooltipEl.appendChild(metaEl);
-
-      const idEl = document.createElement("div");
-      idEl.className = "linian-tooltip-identifier";
-      idEl.textContent = issue.identifier;
-      tooltipEl.appendChild(idEl);
-
-      if (issue.description) {
-        const descEl = document.createElement("div");
-        descEl.className = "linian-tooltip-description";
-        const trimmed = issue.description.replace(/\s+/g, " ");
-        const preview = trimmed.slice(0, 260);
-        descEl.textContent =
-          preview + (trimmed.length > preview.length ? "…" : "");
-        tooltipEl.appendChild(descEl);
-      }
-
-      const rect = element.getBoundingClientRect();
-      tooltipEl.style.position = "fixed";
-      tooltipEl.style.top = `${rect.bottom + 8}px`;
-      tooltipEl.style.left = `${rect.left}px`;
-      tooltipEl.style.maxWidth = "360px";
-      tooltipEl.style.zIndex = "1000";
-
-      document.body.appendChild(tooltipEl);
-    };
-
-    const hideTooltip = () => {
-      if (tooltipEl) {
-        tooltipEl.remove();
-        tooltipEl = null;
-      }
-    };
-
-    element.addEventListener("mouseenter", showTooltip);
-    element.addEventListener("mouseleave", hideTooltip);
-    element.addEventListener("click", hideTooltip);
-  }
-
-  updateSettings(settings: LinearSettings): void {
-    this.settings = settings;
+    el.textContent = identifier;
+    el.setAttribute(
+      "title",
+      "Not cached yet and Linear is currently unreachable."
+    );
+    return el;
   }
 }

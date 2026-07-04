@@ -2,13 +2,20 @@ import { LinearSettings } from "./types";
 
 export const DEFAULT_SETTINGS: LinearSettings = {
 	apiKey: "",
-	organizationId: "",
-	defaultTeam: "",
 	enablePriorityIcons: true,
 	enableAssigneeAvatars: true,
-	cacheTimeout: 300000, // 5 minutes
 	maxCacheSize: 1000,
+	autoRefresh: true,
+	staleAfterMs: 6 * 60 * 60 * 1000, // 6 hours
 };
+
+/**
+ * Normalize a raw shortcode identifier to its canonical cache key.
+ * Linear team keys are uppercase and its `eq` filter is case-sensitive, so we
+ * upper-case everything; the numeric suffix is unaffected.
+ */
+export const normalizeIdentifier = (raw: string): string =>
+	raw.trim().toUpperCase();
 
 const SHORTCODE_PATTERN = "\\[(L_)?([A-Za-z]+(?:-[A-Za-z]*)?-\\d+)\\]";
 
@@ -45,6 +52,11 @@ export const GRAPHQL_QUERIES = {
 						key
 						name
 					}
+					comments {
+						nodes {
+							id
+						}
+					}
 					createdAt
 					updatedAt
 				}
@@ -78,4 +90,12 @@ export const PRIORITY_ICONS: { [key: number]: string } = {
   2: "🟡", // Medium
   3: "🟠", // High
   4: "🔴", // Urgent
+};
+
+export const PRIORITY_LABELS: { [key: number]: string } = {
+  0: "No priority",
+  1: "Low",
+  2: "Medium",
+  3: "High",
+  4: "Urgent",
 };
