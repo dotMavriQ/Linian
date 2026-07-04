@@ -27,19 +27,22 @@ __export(main_exports, {
   default: () => LinianPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian6 = require("obsidian");
+
+// src/api.ts
+var import_obsidian = require("obsidian");
 
 // src/constants.ts
 var DEFAULT_SETTINGS = {
   apiKey: "",
-  organizationId: "",
-  defaultTeam: "",
   enablePriorityIcons: true,
   enableAssigneeAvatars: true,
-  cacheTimeout: 3e5,
-  // 5 minutes
-  maxCacheSize: 1e3
+  maxCacheSize: 1e3,
+  autoRefresh: true,
+  staleAfterMs: 6 * 60 * 60 * 1e3
+  // 6 hours
 };
+var normalizeIdentifier = (raw) => raw.trim().toUpperCase();
 var SHORTCODE_PATTERN = "\\[(L_)?([A-Za-z]+(?:-[A-Za-z]*)?-\\d+)\\]";
 var LINEAR_SHORTCODE_REGEX = new RegExp(SHORTCODE_PATTERN, "gi");
 var createShortcodeRegex = () => new RegExp(SHORTCODE_PATTERN, "gi");
@@ -72,6 +75,11 @@ var GRAPHQL_QUERIES = {
 						key
 						name
 					}
+					comments {
+						nodes {
+							id
+						}
+					}
 					createdAt
 					updatedAt
 				}
@@ -102,115 +110,89 @@ var PRIORITY_ICONS = {
   4: "\u{1F534}"
   // Urgent
 };
+var PRIORITY_LABELS = {
+  0: "No priority",
+  1: "Low",
+  2: "Medium",
+  3: "High",
+  4: "Urgent"
+};
 
 // src/api.ts
-var SimpleGraphQLClient = class {
-  constructor(endpoint, headers) {
-    this.endpoint = endpoint;
-    this.headers = headers;
-  }
-  async request(query, variables = {}) {
-    console.log("Making GraphQL request to Linear API");
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...this.headers
-      },
-      body: JSON.stringify({
-        query,
-        variables
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.errors) {
-      throw new Error(
-        `GraphQL error: ${data.errors.map((e) => e.message).join(", ")}`
-      );
-    }
-    return data.data;
-  }
-};
+var LINEAR_ENDPOINT = "https://api.linear.app/graphql";
 var LinearAPIService = class {
-  constructor(apiKey, cacheTimeout = 3e5, maxCacheSize = 1e3) {
-    this.cache = {};
-    this.client = new SimpleGraphQLClient("https://api.linear.app/graphql", {
-      Authorization: apiKey
-      // Fixed: Capital 'A' and direct key usage per Linear docs
-    });
-    this.cacheTimeout = cacheTimeout;
-    this.maxCacheSize = maxCacheSize;
+  constructor(apiKey) {
+    this.apiKey = apiKey;
   }
   updateApiKey(apiKey) {
-    this.client = new SimpleGraphQLClient("https://api.linear.app/graphql", {
-      Authorization: apiKey
-      // Fixed: Capital 'A' and direct key usage per Linear docs
-    });
+    this.apiKey = apiKey;
   }
-  async getIssue(identifier) {
-    var _a, _b;
-    console.log(`Getting issue: ${identifier}`);
-    const cached = this.cache[identifier];
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      console.log(`Returning cached issue: ${identifier}`);
-      return cached.issue;
-    }
+  /**
+   * Fetch a single issue by identifier. Uses Obsidian's `requestUrl` so the
+   * request runs in the main process — no CORS/CSP restrictions, works on
+   * mobile.
+   */
+  async fetchIssue(identifier) {
+    var _a, _b, _c, _d, _e;
+    const match = normalizeIdentifier(identifier).match(/^([A-Z]+)-(\d+)$/);
+    if (!match)
+      return { status: "not-found" };
+    const teamKey = match[1];
+    const number = parseInt(match[2], 10);
+    let response;
     try {
-      console.log(`Fetching issue from API: ${identifier}`);
-      const match = identifier.match(/^([A-Za-z]+)-(\d+)$/);
-      if (!match) {
-        console.error(`Invalid identifier format: ${identifier}`);
-        return null;
-      }
-      const [, teamKey, numberStr] = match;
-      const number = parseInt(numberStr, 10);
-      console.log(`Searching for team: ${teamKey}, number: ${number}`);
-      const response = await this.client.request(GRAPHQL_QUERIES.ISSUE_BY_IDENTIFIER, { teamKey, number });
-      console.log("API Response:", response);
-      if (((_b = (_a = response.issues) == null ? void 0 : _a.nodes) == null ? void 0 : _b.length) > 0) {
-        const issue = response.issues.nodes[0];
-        this.updateCache(identifier, issue);
-        return issue;
-      }
-      console.log(`No issue found for ${identifier}`);
-      return null;
-    } catch (error) {
-      console.error("Error fetching Linear issue:", error);
-      return null;
+      response = await (0, import_obsidian.requestUrl)({
+        url: LINEAR_ENDPOINT,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: this.apiKey
+        },
+        body: JSON.stringify({
+          query: GRAPHQL_QUERIES.ISSUE_BY_IDENTIFIER,
+          variables: { teamKey, number }
+        }),
+        throw: false
+      });
+    } catch (e) {
+      return { status: "unreachable" };
     }
+    if (response.status < 200 || response.status >= 300) {
+      return { status: "unreachable" };
+    }
+    const payload = response.json;
+    if (payload.errors) {
+      return { status: "unreachable" };
+    }
+    const node = (_c = (_b = (_a = payload.data) == null ? void 0 : _a.issues) == null ? void 0 : _b.nodes) == null ? void 0 : _c[0];
+    if (node) {
+      const { comments, ...issue } = node;
+      issue.commentCount = (_e = (_d = comments == null ? void 0 : comments.nodes) == null ? void 0 : _d.length) != null ? _e : 0;
+      return { status: "ok", issue };
+    }
+    return { status: "not-found" };
   }
+  /** Used by the settings "Test Connection" button. */
   async getTeams() {
+    var _a, _b, _c;
     try {
-      const response = await this.client.request(GRAPHQL_QUERIES.ORGANIZATION_TEAMS);
-      return response.teams.nodes;
-    } catch (error) {
-      console.error("Error fetching Linear teams:", error);
+      const response = await (0, import_obsidian.requestUrl)({
+        url: LINEAR_ENDPOINT,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: this.apiKey
+        },
+        body: JSON.stringify({ query: GRAPHQL_QUERIES.ORGANIZATION_TEAMS }),
+        throw: false
+      });
+      if (response.status < 200 || response.status >= 300)
+        return [];
+      const payload = response.json;
+      return (_c = (_b = (_a = payload.data) == null ? void 0 : _a.teams) == null ? void 0 : _b.nodes) != null ? _c : [];
+    } catch (e) {
       return [];
     }
-  }
-  updateCache(identifier, issue) {
-    if (Object.keys(this.cache).length >= this.maxCacheSize) {
-      const oldestKey = Object.keys(this.cache).sort(
-        (a, b) => this.cache[a].timestamp - this.cache[b].timestamp
-      )[0];
-      delete this.cache[oldestKey];
-    }
-    this.cache[identifier] = {
-      issue,
-      timestamp: Date.now()
-    };
-  }
-  clearCache() {
-    this.cache = {};
-  }
-  getCacheStats() {
-    return {
-      size: Object.keys(this.cache).length,
-      maxSize: this.maxCacheSize
-    };
   }
 };
 
@@ -219,12 +201,20 @@ var LinearRenderer = class {
   constructor(settings) {
     this.settings = settings;
   }
-  createIssueElement(issue, displayMode = "compact") {
+  updateSettings(settings) {
+    this.settings = settings;
+  }
+  /** Build the inline issue link from a cached snapshot. */
+  createIssueElement(entry, displayMode = "compact") {
     var _a;
+    const { issue } = entry;
     const issueEl = document.createElement("a");
     issueEl.className = "linian-issue-link";
     if (displayMode === "expanded") {
       issueEl.classList.add("linian-issue-link--expanded");
+    }
+    if (entry.status !== "fresh") {
+      issueEl.classList.add("linian-issue-link--cached");
     }
     issueEl.href = issue.url;
     issueEl.setAttribute(
@@ -233,21 +223,14 @@ var LinearRenderer = class {
     );
     const contentEl = document.createElement("span");
     contentEl.className = "linian-issue-content";
-    const shouldShowPriorityIcon = this.settings.enablePriorityIcons && issue.priority !== void 0;
-    if (shouldShowPriorityIcon && displayMode === "compact") {
+    const showPriority = this.settings.enablePriorityIcons && issue.priority !== void 0;
+    if (showPriority && displayMode === "compact") {
       const priorityEl = document.createElement("span");
       priorityEl.className = "linian-priority-icon";
       priorityEl.textContent = PRIORITY_ICONS[issue.priority] || PRIORITY_ICONS[0];
-      const priorityLabels = {
-        0: "No priority",
-        1: "Low",
-        2: "Medium",
-        3: "High",
-        4: "Urgent"
-      };
       priorityEl.setAttribute(
         "title",
-        priorityLabels[issue.priority] || "No priority"
+        PRIORITY_LABELS[issue.priority] || PRIORITY_LABELS[0]
       );
       contentEl.appendChild(priorityEl);
     }
@@ -286,9 +269,6 @@ var LinearRenderer = class {
       avatarEl.setAttribute("title", `Assigned to ${issue.assignee.name}`);
       issueEl.appendChild(avatarEl);
     }
-    if (displayMode === "expanded") {
-      this.attachTooltip(issueEl, issue);
-    }
     return issueEl;
   }
   createLoadingElement(identifier, displayMode = "compact") {
@@ -296,208 +276,409 @@ var LinearRenderer = class {
     loadingEl.className = "linian-loading";
     if (displayMode === "expanded") {
       loadingEl.classList.add("linian-loading--expanded");
-      loadingEl.textContent = "Loading issue...";
+      loadingEl.textContent = "Loading issue\u2026";
     } else {
       loadingEl.textContent = identifier;
     }
-    loadingEl.setAttribute("title", "Loading Linear issue...");
+    loadingEl.setAttribute("title", "Loading Linear issue\u2026");
     return loadingEl;
   }
-  createErrorElement(identifier, displayMode = "compact") {
-    const errorEl = document.createElement("span");
-    errorEl.className = "linian-error";
+  /** Shown only when there is no cached snapshot and Linear is unreachable. */
+  createUnavailableElement(identifier, displayMode = "compact") {
+    const el = document.createElement("span");
+    el.className = "linian-unavailable";
     if (displayMode === "expanded") {
-      errorEl.classList.add("linian-error--expanded");
-      errorEl.textContent = "Failed to load issue";
-    } else {
-      errorEl.textContent = identifier;
+      el.classList.add("linian-unavailable--expanded");
     }
-    errorEl.setAttribute("title", "Failed to load Linear issue");
-    return errorEl;
+    el.textContent = identifier;
+    el.setAttribute(
+      "title",
+      "Not cached yet and Linear is currently unreachable."
+    );
+    return el;
   }
-  attachTooltip(element, issue) {
-    let tooltipEl = null;
-    const showTooltip = () => {
-      if (tooltipEl)
+};
+
+// src/cache.ts
+var import_obsidian2 = require("obsidian");
+var CACHE_FILE = "issue-cache.json";
+var CACHE_VERSION = 1;
+var IssueCacheStore = class {
+  constructor(plugin, maxSize) {
+    this.plugin = plugin;
+    this.entries = /* @__PURE__ */ new Map();
+    this.maxSize = maxSize;
+    this.persist = (0, import_obsidian2.debounce)(() => void this.flush(), 1500, false);
+  }
+  setMaxSize(maxSize) {
+    this.maxSize = maxSize;
+  }
+  get path() {
+    return (0, import_obsidian2.normalizePath)(`${this.plugin.manifest.dir}/${CACHE_FILE}`);
+  }
+  /** Load persisted snapshots from disk. Safe to call once on plugin load. */
+  async load() {
+    try {
+      const adapter = this.plugin.app.vault.adapter;
+      if (!await adapter.exists(this.path))
         return;
-      tooltipEl = document.createElement("div");
-      tooltipEl.className = "linian-tooltip";
-      const titleEl = document.createElement("div");
-      titleEl.className = "linian-tooltip-title";
-      titleEl.textContent = issue.title;
-      tooltipEl.appendChild(titleEl);
-      const metaEl = document.createElement("div");
-      metaEl.className = "linian-tooltip-meta";
-      metaEl.innerHTML = `
-        <span class="linian-tooltip-status" style="background-color: ${issue.state.color}">
-          ${issue.state.name}
-        </span>
-        <span class="linian-tooltip-team">${issue.team.name}</span>
-        ${issue.assignee ? `<span class="linian-tooltip-assignee">@${issue.assignee.name}</span>` : ""}
-      `;
-      tooltipEl.appendChild(metaEl);
-      const idEl = document.createElement("div");
-      idEl.className = "linian-tooltip-identifier";
-      idEl.textContent = issue.identifier;
-      tooltipEl.appendChild(idEl);
-      if (issue.description) {
-        const descEl = document.createElement("div");
-        descEl.className = "linian-tooltip-description";
-        const trimmed = issue.description.replace(/\s+/g, " ");
-        const preview = trimmed.slice(0, 260);
-        descEl.textContent = preview + (trimmed.length > preview.length ? "\u2026" : "");
-        tooltipEl.appendChild(descEl);
-      }
-      const rect = element.getBoundingClientRect();
-      tooltipEl.style.position = "fixed";
-      tooltipEl.style.top = `${rect.bottom + 8}px`;
-      tooltipEl.style.left = `${rect.left}px`;
-      tooltipEl.style.maxWidth = "360px";
-      tooltipEl.style.zIndex = "1000";
-      document.body.appendChild(tooltipEl);
-    };
-    const hideTooltip = () => {
-      if (tooltipEl) {
-        tooltipEl.remove();
-        tooltipEl = null;
-      }
-    };
-    element.addEventListener("mouseenter", showTooltip);
-    element.addEventListener("mouseleave", hideTooltip);
-    element.addEventListener("click", hideTooltip);
+      const raw = await adapter.read(this.path);
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== CACHE_VERSION || !parsed.entries)
+        return;
+      this.entries = new Map(Object.entries(parsed.entries));
+    } catch (e) {
+      this.entries = /* @__PURE__ */ new Map();
+    }
   }
-  updateSettings(settings) {
-    this.settings = settings;
+  async flush() {
+    try {
+      const data = {
+        version: CACHE_VERSION,
+        entries: Object.fromEntries(this.entries)
+      };
+      await this.plugin.app.vault.adapter.write(
+        this.path,
+        JSON.stringify(data)
+      );
+    } catch (e) {
+    }
+  }
+  /** Force any pending write immediately (used on unload). */
+  async flushNow() {
+    await this.flush();
+  }
+  get(rawKey) {
+    return this.entries.get(normalizeIdentifier(rawKey));
+  }
+  /** Store a freshly-fetched issue and mark it fresh. */
+  set(rawKey, issue) {
+    const key = normalizeIdentifier(rawKey);
+    const now = Date.now();
+    const entry = {
+      issue,
+      fetchedAt: now,
+      lastAttempt: now,
+      status: "fresh"
+    };
+    this.entries.set(key, entry);
+    this.evictIfNeeded();
+    this.persist();
+    return entry;
+  }
+  /**
+   * Record a failed revalidation without discarding the stored snapshot.
+   * Returns the retained entry (if any) so callers can keep rendering it.
+   */
+  markStale(rawKey, status) {
+    const key = normalizeIdentifier(rawKey);
+    const entry = this.entries.get(key);
+    if (!entry)
+      return void 0;
+    entry.lastAttempt = Date.now();
+    entry.status = status;
+    this.persist();
+    return entry;
+  }
+  clear() {
+    this.entries.clear();
+    this.persist();
+  }
+  size() {
+    return this.entries.size;
+  }
+  evictIfNeeded() {
+    if (this.entries.size <= this.maxSize)
+      return;
+    const sorted = [...this.entries.entries()].sort(
+      (a, b) => a[1].fetchedAt - b[1].fetchedAt
+    );
+    const overflow = this.entries.size - this.maxSize;
+    for (let i = 0; i < overflow; i++) {
+      this.entries.delete(sorted[i][0]);
+    }
+  }
+};
+
+// src/issue-controller.ts
+var IssueController = class {
+  constructor(api, cache, renderer, getSettings, openCard) {
+    this.api = api;
+    this.cache = cache;
+    this.renderer = renderer;
+    this.getSettings = getSettings;
+    this.openCard = openCard;
+    this.inFlight = /* @__PURE__ */ new Map();
+    this.revalidatedThisSession = /* @__PURE__ */ new Set();
+  }
+  render(container, rawKey, mode) {
+    const key = normalizeIdentifier(rawKey);
+    const cached = this.cache.get(key);
+    if (cached) {
+      this.paint(container, cached, mode);
+      if (this.shouldRevalidate(cached)) {
+        void this.ensureFresh(key).then((entry) => {
+          if (entry)
+            this.paint(container, entry, mode);
+        });
+      }
+      return;
+    }
+    container.replaceChildren(this.renderer.createLoadingElement(key, mode));
+    void this.ensureFresh(key).then((entry) => {
+      if (entry)
+        this.paint(container, entry, mode);
+      else
+        container.replaceChildren(
+          this.renderer.createUnavailableElement(key, mode)
+        );
+    });
+  }
+  paint(container, entry, mode) {
+    const el = this.renderer.createIssueElement(entry, mode);
+    el.addEventListener("click", (evt) => {
+      if (evt.ctrlKey || evt.metaKey || evt.button === 1)
+        return;
+      evt.preventDefault();
+      this.openCard(entry);
+    });
+    container.replaceChildren(el);
+  }
+  shouldRevalidate(entry) {
+    const settings = this.getSettings();
+    if (!settings.autoRefresh)
+      return false;
+    const key = normalizeIdentifier(entry.issue.identifier);
+    if (this.revalidatedThisSession.has(key))
+      return false;
+    return Date.now() - entry.fetchedAt >= settings.staleAfterMs;
+  }
+  /** Fetch once per id per session, deduped across concurrent callers. */
+  ensureFresh(rawKey) {
+    const key = normalizeIdentifier(rawKey);
+    const existing = this.inFlight.get(key);
+    if (existing)
+      return existing;
+    const promise = this.doFetch(key).finally(() => {
+      this.inFlight.delete(key);
+      this.revalidatedThisSession.add(key);
+    });
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+  async doFetch(key) {
+    const result = await this.api.fetchIssue(key);
+    switch (result.status) {
+      case "ok":
+        return this.cache.set(key, result.issue);
+      case "not-found":
+        return this.cache.markStale(key, "inaccessible");
+      case "unreachable":
+        return this.cache.markStale(key, "unreachable");
+    }
+  }
+  /**
+   * Force the next render of every cached issue to revalidate (manual
+   * "Refresh" command). Does not fetch here — repaint happens as notes
+   * re-render.
+   */
+  resetSessionGuard() {
+    this.revalidatedThisSession.clear();
+  }
+};
+
+// src/card.ts
+var import_obsidian3 = require("obsidian");
+function formatRelative(ts) {
+  const diff = Date.now() - ts;
+  const min = Math.round(diff / 6e4);
+  if (min < 1)
+    return "just now";
+  if (min < 60)
+    return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const hrs = Math.round(min / 60);
+  if (hrs < 24)
+    return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+var IssueCard = class extends import_obsidian3.Modal {
+  constructor(app, entry) {
+    super(app);
+    this.entry = entry;
+    this.component = new import_obsidian3.Component();
+  }
+  onOpen() {
+    const { contentEl } = this;
+    const { issue, status, fetchedAt } = this.entry;
+    contentEl.addClass("linian-card");
+    const header = contentEl.createDiv({ cls: "linian-card-header" });
+    header.createEl("span", {
+      cls: "linian-card-identifier",
+      text: issue.identifier
+    });
+    const statusPill = header.createEl("span", {
+      cls: "linian-card-status",
+      text: issue.state.name
+    });
+    statusPill.style.backgroundColor = issue.state.color;
+    contentEl.createEl("h3", { cls: "linian-card-title", text: issue.title });
+    const meta = contentEl.createDiv({ cls: "linian-card-meta" });
+    meta.createEl("span", {
+      cls: "linian-card-team",
+      text: issue.team.name
+    });
+    if (issue.assignee) {
+      meta.createEl("span", {
+        cls: "linian-card-assignee",
+        text: `@${issue.assignee.name}`
+      });
+    }
+    if (issue.priority !== void 0) {
+      meta.createEl("span", {
+        cls: "linian-card-priority",
+        text: `${PRIORITY_ICONS[issue.priority] || PRIORITY_ICONS[0]} ${PRIORITY_LABELS[issue.priority] || PRIORITY_LABELS[0]}`
+      });
+    }
+    if (issue.commentCount !== void 0) {
+      const n = issue.commentCount;
+      meta.createEl("span", {
+        cls: "linian-card-comments",
+        text: `\u{1F4AC} ${n} comment${n === 1 ? "" : "s"}`
+      });
+    }
+    if (issue.description) {
+      this.component.load();
+      const descEl = contentEl.createDiv({ cls: "linian-card-description" });
+      void import_obsidian3.MarkdownRenderer.render(
+        this.app,
+        issue.description,
+        descEl,
+        "",
+        this.component
+      );
+    }
+    const footer = contentEl.createDiv({ cls: "linian-card-footer" });
+    const note = footer.createEl("span", { cls: "linian-card-freshness" });
+    if (status === "fresh") {
+      note.setText(`Updated ${formatRelative(fetchedAt)}`);
+    } else if (status === "inaccessible") {
+      note.addClass("linian-card-freshness--warn");
+      note.setText(
+        `Saved copy \u2014 no longer accessible in Linear (last updated ${formatRelative(
+          fetchedAt
+        )})`
+      );
+    } else {
+      note.addClass("linian-card-freshness--warn");
+      note.setText(
+        `Saved copy \u2014 Linear unreachable (last updated ${formatRelative(
+          fetchedAt
+        )})`
+      );
+    }
+    new import_obsidian3.ButtonComponent(footer).setButtonText("Open in Linear").setCta().onClick(() => window.open(issue.url, "_blank"));
+  }
+  onClose() {
+    this.component.unload();
+    this.contentEl.empty();
   }
 };
 
 // src/settings.ts
-var import_obsidian = require("obsidian");
-var LinianSettingTab = class extends import_obsidian.PluginSettingTab {
+var import_obsidian4 = require("obsidian");
+var STALE_PRESETS = {
+  "1 hour": 60 * 60 * 1e3,
+  "6 hours": 6 * 60 * 60 * 1e3,
+  "24 hours": 24 * 60 * 60 * 1e3
+};
+var LinianSettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
-    this.apiService = null;
     this.plugin = plugin;
   }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Linian Settings" });
-    new import_obsidian.Setting(containerEl).setName("Linear API Key").setDesc(
-      "Your Linear API key. You can generate one in Linear Settings > API."
-    ).addText(
-      (text) => text.setPlaceholder("lin_api_...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-        this.plugin.settings.apiKey = value;
+    new import_obsidian4.Setting(containerEl).setName("Linear API key").setDesc("Generate a personal API key in Linear: Settings \u2192 API.").addText(
+      (text) => text.setPlaceholder("lin_api_\u2026").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+        this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
-        if (value) {
-          this.apiService = new LinearAPIService(
-            value,
-            this.plugin.settings.cacheTimeout,
-            this.plugin.settings.maxCacheSize
-          );
-          this.plugin.updateAPIService(this.apiService);
-        }
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Test Connection").setDesc("Test your Linear API connection").addButton(
-      (button) => button.setButtonText("Test").setDisabled(!this.plugin.settings.apiKey).onClick(async () => {
-        if (!this.apiService && this.plugin.settings.apiKey) {
-          this.apiService = new LinearAPIService(
-            this.plugin.settings.apiKey
-          );
+    new import_obsidian4.Setting(containerEl).setName("Test connection").setDesc("Verify the API key can reach your Linear workspace.").addButton(
+      (button) => button.setButtonText("Test").onClick(async () => {
+        button.setButtonText("Testing\u2026").setDisabled(true);
+        const teams = await this.plugin.api.getTeams();
+        if (teams.length > 0) {
+          button.setButtonText("\u2713 Connected").setCta();
+        } else {
+          button.setButtonText("\u2717 Failed").removeCta();
         }
-        if (this.apiService) {
-          button.setButtonText("Testing...");
-          button.setDisabled(true);
-          try {
-            const teams = await this.apiService.getTeams();
-            if (teams.length > 0) {
-              button.setButtonText("\u2713 Connected");
-              button.setCta();
-            } else {
-              button.setButtonText("\u2717 Failed");
-              button.removeCta();
-            }
-          } catch (error) {
-            button.setButtonText("\u2717 Error");
-            button.removeCta();
-          }
-          setTimeout(() => {
-            button.setButtonText("Test");
-            button.setDisabled(false);
-            button.removeCta();
-          }, 3e3);
-        }
+        window.setTimeout(() => {
+          button.setButtonText("Test").setDisabled(false).removeCta();
+        }, 3e3);
       })
     );
-    containerEl.createEl("h3", { text: "Display Options" });
-    new import_obsidian.Setting(containerEl).setName("Show Priority Icons").setDesc("Display priority icons next to issue identifiers").addToggle(
+    new import_obsidian4.Setting(containerEl).setName("Display").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Show priority icons").setDesc("Display a priority icon next to compact issue identifiers.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enablePriorityIcons).onChange(async (value) => {
         this.plugin.settings.enablePriorityIcons = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Show Assignee Avatars").setDesc("Display assignee avatars for issues").addToggle(
+    new import_obsidian4.Setting(containerEl).setName("Show assignee avatars").setDesc("Display the assignee's avatar on compact issues.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableAssigneeAvatars).onChange(async (value) => {
         this.plugin.settings.enableAssigneeAvatars = value;
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Performance" });
-    new import_obsidian.Setting(containerEl).setName("Cache Timeout").setDesc("How long to cache issue data (in minutes)").addSlider(
-      (slider) => slider.setLimits(1, 60, 1).setValue(this.plugin.settings.cacheTimeout / 6e4).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.cacheTimeout = value * 6e4;
+    new import_obsidian4.Setting(containerEl).setName("Sync").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Background refresh").setDesc(
+      "Quietly revalidate cached issues when they age. Cached data is always kept if a refresh fails."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.autoRefresh).onChange(async (value) => {
+        this.plugin.settings.autoRefresh = value;
         await this.plugin.saveSettings();
-        if (this.apiService) {
-          this.apiService = new LinearAPIService(
-            this.plugin.settings.apiKey,
-            this.plugin.settings.cacheTimeout,
-            this.plugin.settings.maxCacheSize
-          );
-          this.plugin.updateAPIService(this.apiService);
-        }
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Max Cache Size").setDesc("Maximum number of issues to cache").addSlider(
+    new import_obsidian4.Setting(containerEl).setName("Refresh after").setDesc("How long a cached issue stays fresh before a background refresh.").addDropdown((dropdown) => {
+      var _a;
+      for (const label of Object.keys(STALE_PRESETS)) {
+        dropdown.addOption(label, label);
+      }
+      const current = (_a = Object.keys(STALE_PRESETS).find(
+        (l) => STALE_PRESETS[l] === this.plugin.settings.staleAfterMs
+      )) != null ? _a : "6 hours";
+      dropdown.setValue(current).onChange(async (label) => {
+        this.plugin.settings.staleAfterMs = STALE_PRESETS[label];
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian4.Setting(containerEl).setName("Cache").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Maximum cached issues").setDesc("Least-recently-fetched issues are evicted beyond this limit.").addSlider(
       (slider) => slider.setLimits(100, 5e3, 100).setValue(this.plugin.settings.maxCacheSize).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.maxCacheSize = value;
         await this.plugin.saveSettings();
-        if (this.apiService) {
-          this.apiService = new LinearAPIService(
-            this.plugin.settings.apiKey,
-            this.plugin.settings.cacheTimeout,
-            this.plugin.settings.maxCacheSize
-          );
-          this.plugin.updateAPIService(this.apiService);
-        }
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Clear Cache").setDesc("Clear all cached issue data").addButton(
-      (button) => button.setButtonText("Clear Cache").setWarning().onClick(() => {
-        if (this.apiService) {
-          this.apiService.clearCache();
-          button.setButtonText("\u2713 Cleared");
-          setTimeout(() => {
-            button.setButtonText("Clear Cache");
-          }, 2e3);
-        }
+    new import_obsidian4.Setting(containerEl).setName("Clear cache").setDesc(
+      `Delete all ${this.plugin.cache.size()} saved issue snapshots. Offline previews will be unavailable until issues are fetched again.`
+    ).addButton(
+      (button) => button.setButtonText("Clear").setWarning().onClick(() => {
+        this.plugin.cache.clear();
+        button.setButtonText("\u2713 Cleared");
+        window.setTimeout(() => this.display(), 1200);
       })
     );
-    if (this.apiService) {
-      const stats = this.apiService.getCacheStats();
-      containerEl.createEl("p", {
-        text: `Cache: ${stats.size}/${stats.maxSize} items`,
-        cls: "setting-item-description"
-      });
-    }
   }
 };
 
 // src/live-preview.ts
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var import_obsidian2 = require("obsidian");
-var isEditorInLivePreviewMode = (view) => view.state.field(import_obsidian2.editorLivePreviewField);
+var import_obsidian5 = require("obsidian");
+var isEditorInLivePreviewMode = (view) => view.state.field(import_obsidian5.editorLivePreviewField);
 var isCursorInsideTag = (view, start, length) => {
   const cursor = view.state.selection.main.head;
   return cursor > start - 1 && cursor < start + length + 1;
@@ -508,67 +689,27 @@ var isSelectionContainsTag = (view, start, length) => {
   return selectionEnd > start - 1 && selectionBegin < start + length + 1;
 };
 var LinearIssueWidget = class extends import_view.WidgetType {
-  constructor(key, apiService, renderer, displayMode) {
+  constructor(key, controller, displayMode) {
     super();
-    this._destroyed = false;
-    this._issueKey = key;
-    this._apiService = apiService;
-    this._renderer = renderer;
-    this._displayMode = displayMode;
-    this._htmlContainer = document.createElement("span");
-    this._htmlContainer.className = "linian-inline-issue linian-container";
-    this.buildTag();
+    this.key = key;
+    this.controller = controller;
+    this.displayMode = displayMode;
+    this._container = document.createElement("span");
+    this._container.className = "linian-inline-issue linian-container";
+    this.controller.render(this._container, this.key, this.displayMode);
   }
-  buildTag() {
-    if (this._destroyed)
-      return;
-    const loadingElement = this._renderer.createLoadingElement(
-      this._issueKey,
-      this._displayMode
-    );
-    this._htmlContainer.replaceChildren(loadingElement);
-    const timeoutPromise = new Promise(
-      (_, reject) => setTimeout(() => reject(new Error("API timeout")), 1e4)
-    );
-    Promise.race([this._apiService.getIssue(this._issueKey), timeoutPromise]).then((result) => {
-      if (this._destroyed)
-        return;
-      const issue = result;
-      if (issue) {
-        const issueElement = this._renderer.createIssueElement(
-          issue,
-          this._displayMode
-        );
-        this._htmlContainer.replaceChildren(issueElement);
-      } else {
-        const errorElement = this._renderer.createErrorElement(
-          this._issueKey,
-          this._displayMode
-        );
-        this._htmlContainer.replaceChildren(errorElement);
-      }
-    }).catch((error) => {
-      if (this._destroyed)
-        return;
-      console.error("Error fetching Linear issue:", error);
-      const errorElement = this._renderer.createErrorElement(
-        this._issueKey,
-        this._displayMode
-      );
-      this._htmlContainer.replaceChildren(errorElement);
-    });
+  eq(other) {
+    return other.key === this.key && other.displayMode === this.displayMode;
   }
-  toDOM(view) {
-    return this._htmlContainer;
+  toDOM() {
+    return this._container;
   }
   destroy() {
-    this._destroyed = true;
-    this._htmlContainer.replaceChildren();
+    this._container.replaceChildren();
   }
 };
-var linearMatchDecorator = { ref: null };
-function buildMatchDecorator(apiService, renderer) {
-  linearMatchDecorator.ref = new import_view.MatchDecorator({
+function buildMatchDecorator(controller) {
+  return new import_view.MatchDecorator({
     regexp: LINEAR_SHORTCODE_REGEX,
     decoration: (match, view, pos) => {
       const displayMode = match[1] ? "expanded" : "compact";
@@ -579,234 +720,100 @@ function buildMatchDecorator(apiService, renderer) {
           tagName: "span",
           class: "linian-shortcode-highlight"
         });
-      } else {
-        return import_view.Decoration.replace({
-          widget: new LinearIssueWidget(
-            key,
-            apiService,
-            renderer,
-            displayMode
-          )
-        });
       }
+      return import_view.Decoration.replace({
+        widget: new LinearIssueWidget(key, controller, displayMode)
+      });
     }
   });
 }
-function buildViewPluginClass(matchDecorator) {
+function buildViewPlugin(decorator) {
   class ViewPluginClass {
     constructor(view) {
-      this.decorators = matchDecorator.ref ? matchDecorator.ref.createDeco(view) : import_state.RangeSet.empty;
+      this.decorators = decorator.createDeco(view);
     }
     update(update) {
       const editorModeChanged = update.startState.field(
-        import_obsidian2.editorLivePreviewField
+        import_obsidian5.editorLivePreviewField
       ) !== update.state.field(
-        import_obsidian2.editorLivePreviewField
+        import_obsidian5.editorLivePreviewField
       );
       if (update.docChanged || update.startState.selection.main !== update.state.selection.main || editorModeChanged) {
-        this.decorators = matchDecorator.ref ? matchDecorator.ref.createDeco(update.view) : import_state.RangeSet.empty;
+        this.decorators = decorator.createDeco(update.view);
       }
     }
     destroy() {
       this.decorators = import_state.RangeSet.empty;
     }
   }
-  const ViewPluginSpec = {
+  const spec = {
     decorations: (viewPlugin) => viewPlugin.decorators
   };
-  return {
-    class: ViewPluginClass,
-    spec: ViewPluginSpec
-  };
+  return import_view.ViewPlugin.fromClass(ViewPluginClass, spec);
 }
 var LinearViewPluginManager = class {
   constructor() {
-    this._apiService = null;
-    this._renderer = null;
-    this.update();
+    this._viewPlugin = null;
   }
-  setServices(apiService, renderer) {
-    this._apiService = apiService;
-    this._renderer = renderer;
-    this.update();
-  }
-  update() {
-    if (this._apiService && this._renderer) {
-      buildMatchDecorator(this._apiService, this._renderer);
-      const viewPluginClass = buildViewPluginClass(linearMatchDecorator);
-      this._viewPlugin = import_view.ViewPlugin.fromClass(
-        viewPluginClass.class,
-        viewPluginClass.spec
-      );
-    }
+  setController(controller) {
+    this._viewPlugin = buildViewPlugin(buildMatchDecorator(controller));
   }
   getViewPlugin() {
-    return this._viewPlugin || null;
+    return this._viewPlugin;
   }
 };
 
 // main.ts
-var LinianPlugin = class extends import_obsidian3.Plugin {
-  constructor() {
-    super(...arguments);
-    this.apiService = null;
-    this.renderer = null;
-  }
+var LinianPlugin = class extends import_obsidian6.Plugin {
   async onload() {
-    console.log("Loading Linian plugin...");
     await this.loadSettings();
-    console.log("Loaded settings:", this.settings);
-    if (this.settings.apiKey) {
-      console.log("API key found, initializing services");
-      this.initializeServices();
-    } else {
-      console.log("No API key found in settings");
-    }
+    this.cache = new IssueCacheStore(this, this.settings.maxCacheSize);
+    await this.cache.load();
+    this.api = new LinearAPIService(this.settings.apiKey);
+    this.renderer = new LinearRenderer(this.settings);
+    this.controller = new IssueController(
+      this.api,
+      this.cache,
+      this.renderer,
+      () => this.settings,
+      (entry) => new IssueCard(this.app, entry).open()
+    );
     this.addSettingTab(new LinianSettingTab(this.app, this));
-    console.log("Registering markdown post processor");
-    this.postProcessor = this.registerMarkdownPostProcessor(
+    this.registerMarkdownPostProcessor(
       this.processLinearShortcodes.bind(this)
     );
-    console.log("Registering live preview editor extension");
     this.viewPluginManager = new LinearViewPluginManager();
-    if (this.apiService && this.renderer) {
-      this.viewPluginManager.setServices(this.apiService, this.renderer);
-      const viewPlugin = this.viewPluginManager.getViewPlugin();
-      if (viewPlugin) {
-        this.registerEditorExtension(viewPlugin);
-      }
-    }
+    this.viewPluginManager.setController(this.controller);
+    const viewPlugin = this.viewPluginManager.getViewPlugin();
+    if (viewPlugin)
+      this.registerEditorExtension(viewPlugin);
     this.addCommand({
       id: "refresh-linear-cache",
-      name: "Refresh Linear Cache",
+      name: "Refresh Linear cache",
       callback: () => {
-        if (this.apiService) {
-          this.apiService.clearCache();
-          this.app.workspace.updateOptions();
-        }
+        this.controller.resetSessionGuard();
+        this.app.workspace.updateOptions();
       }
     });
-    this.addCommand({
-      id: "debug-linear-shortcodes",
-      name: "Debug Linear Shortcodes",
-      callback: () => {
-        console.log("=== DEBUGGING LINEAR SHORTCODES ===");
-        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
-        if (activeView) {
-          const content = activeView.editor.getValue();
-          console.log("Full page content:", content);
-          const matches = content.match(createShortcodeRegex());
-          console.log("Found matches in content:", matches);
-        }
-        const elements = document.querySelectorAll("*");
-        let foundElements = [];
-        elements.forEach((el) => {
-          if (el.textContent && createShortcodeRegex().test(el.textContent)) {
-            foundElements.push({
-              element: el,
-              tagName: el.tagName,
-              className: el.className,
-              innerHTML: el.innerHTML,
-              textContent: el.textContent
-            });
-          }
-        });
-        console.log("Elements containing shortcodes:", foundElements);
-        const currentLeaf = this.app.workspace.activeLeaf;
-        if (currentLeaf && currentLeaf.view instanceof import_obsidian3.MarkdownView) {
-          const markdownView = currentLeaf.view;
-          console.log(
-            "Manually triggering processing on:",
-            markdownView.contentEl
-          );
-          const mockContext = {
-            docId: "debug",
-            sourcePath: "debug",
-            frontmatter: {},
-            addChild: () => {
-            },
-            getSectionInfo: () => null
-          };
-          this.processLinearShortcodes(markdownView.contentEl, mockContext);
-        }
-      }
-    });
-    console.log("Linian plugin loaded successfully");
   }
-  onunload() {
-    console.log("Unloading Linian plugin...");
-    if (this.apiService) {
-      this.apiService.clearCache();
-      this.apiService = null;
-    }
-    if (this.renderer) {
-      this.renderer = null;
-    }
-    if (this.viewPluginManager) {
-      this.viewPluginManager = null;
-    }
-    const linianElements = document.querySelectorAll(
-      ".linian-inline-issue"
-    );
-    linianElements.forEach((el) => el.remove());
+  async onunload() {
+    if (this.cache)
+      await this.cache.flushNow();
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
   async saveSettings() {
+    var _a, _b, _c;
     await this.saveData(this.settings);
-    if (this.renderer) {
-      this.renderer.updateSettings(this.settings);
-    }
+    (_a = this.renderer) == null ? void 0 : _a.updateSettings(this.settings);
+    (_b = this.api) == null ? void 0 : _b.updateApiKey(this.settings.apiKey);
+    (_c = this.cache) == null ? void 0 : _c.setMaxSize(this.settings.maxCacheSize);
+    this.app.workspace.updateOptions();
   }
-  updateAPIService(apiService) {
-    this.apiService = apiService;
-    this.initializeRenderer();
-  }
-  initializeServices() {
-    this.apiService = new LinearAPIService(
-      this.settings.apiKey,
-      this.settings.cacheTimeout,
-      this.settings.maxCacheSize
-    );
-    this.initializeRenderer();
-  }
-  initializeRenderer() {
-    if (!this.apiService)
-      return;
-    this.renderer = new LinearRenderer(this.settings);
-    if (this.viewPluginManager) {
-      this.viewPluginManager.setServices(this.apiService, this.renderer);
-      const viewPlugin = this.viewPluginManager.getViewPlugin();
-      if (viewPlugin) {
-        this.registerEditorExtension(viewPlugin);
-      }
-    }
-  }
-  async processLinearShortcodes(element, context) {
-    console.log("processLinearShortcodes called with element:", element);
-    console.log("Element innerHTML:", element.innerHTML);
-    console.log("API Service:", !!this.apiService);
-    console.log("Renderer:", !!this.renderer);
-    console.log("Settings API Key:", !!this.settings.apiKey);
-    if (!this.apiService && this.settings.apiKey) {
-      console.log("Initializing services in post processor");
-      this.initializeServices();
-    }
-    if (!this.apiService || !this.renderer) {
-      console.log("Services not initialized, skipping processing");
-      return;
-    }
-    console.log("Processing Linear shortcodes in element:", element);
-    await this.convertInlineIssuesToTags(element);
-  }
-  async convertInlineIssuesToTags(el) {
-    var _a, _b;
-    if (!this.apiService || !this.renderer) {
-      console.log("convertInlineIssuesToTags: Services not available");
-      return;
-    }
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  processLinearShortcodes(element, _context) {
+    var _a, _b, _c, _d;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const textNodes = [];
     while (walker.nextNode()) {
       const current = walker.currentNode;
@@ -816,93 +823,35 @@ var LinianPlugin = class extends import_obsidian3.Plugin {
         continue;
       textNodes.push(current);
     }
-    if (!textNodes.length) {
-      console.log("No text nodes to process");
-    }
-    textNodes.forEach((textNode) => {
-      var _a2, _b2;
-      const sourceText = (_a2 = textNode.nodeValue) != null ? _a2 : "";
+    for (const textNode of textNodes) {
+      const sourceText = (_c = textNode.nodeValue) != null ? _c : "";
       const regex = createShortcodeRegex();
+      const fragment = document.createDocumentFragment();
+      const pending = [];
       let match;
       let lastIndex = 0;
       let hasMatch = false;
-      const fragment = document.createDocumentFragment();
       while ((match = regex.exec(sourceText)) !== null) {
         hasMatch = true;
-        const precedingText = sourceText.slice(lastIndex, match.index);
-        if (precedingText) {
-          fragment.appendChild(document.createTextNode(precedingText));
-        }
-        const displayMode = match[1] ? "expanded" : "compact";
-        const identifier = match[2];
+        const preceding = sourceText.slice(lastIndex, match.index);
+        if (preceding)
+          fragment.appendChild(document.createTextNode(preceding));
+        const mode = match[1] ? "expanded" : "compact";
         const container = document.createElement("span");
         container.className = "linian-inline-issue linian-container";
-        container.setAttribute("data-issue-key", identifier);
-        container.setAttribute("data-display-mode", displayMode);
-        const loadingElement = this.renderer.createLoadingElement(
-          identifier,
-          displayMode
-        );
-        container.appendChild(loadingElement);
         fragment.appendChild(container);
+        pending.push({ container, key: match[2], mode });
         lastIndex = regex.lastIndex;
       }
-      if (!hasMatch) {
-        return;
+      if (!hasMatch)
+        continue;
+      const trailing = sourceText.slice(lastIndex);
+      if (trailing)
+        fragment.appendChild(document.createTextNode(trailing));
+      (_d = textNode.parentNode) == null ? void 0 : _d.replaceChild(fragment, textNode);
+      for (const { container, key, mode } of pending) {
+        this.controller.render(container, key, mode);
       }
-      const trailingText = sourceText.slice(lastIndex);
-      if (trailingText) {
-        fragment.appendChild(document.createTextNode(trailingText));
-      }
-      (_b2 = textNode.parentNode) == null ? void 0 : _b2.replaceChild(fragment, textNode);
-    });
-    const inlineIssueTags = el.querySelectorAll(
-      "span.linian-inline-issue:not([data-rendered])"
-    );
-    console.log("Found inline issue tags:", inlineIssueTags.length);
-    for (const container of Array.from(inlineIssueTags)) {
-      const issueKey = container.getAttribute("data-issue-key");
-      const displayMode = container.getAttribute("data-display-mode") || "compact";
-      if (issueKey) {
-        console.log(
-          `Fetching issue: ${issueKey} (displayMode: ${displayMode})`
-        );
-        this.fetchAndRenderIssue(issueKey, container, displayMode);
-      }
-    }
-  }
-  async fetchAndRenderIssue(identifier, containerElement, displayMode) {
-    if (!this.apiService || !this.renderer)
-      return;
-    try {
-      console.log(`Fetching Linear issue: ${identifier}`);
-      const issue = await this.apiService.getIssue(identifier);
-      console.log("Fetched issue:", issue);
-      if (issue) {
-        const issueElement = this.renderer.createIssueElement(
-          issue,
-          displayMode
-        );
-        containerElement.replaceChildren(issueElement);
-        containerElement.setAttribute("data-rendered", "true");
-        console.log(`Rendered issue: ${identifier}`);
-      } else {
-        const errorElement = this.renderer.createErrorElement(
-          identifier,
-          displayMode
-        );
-        containerElement.replaceChildren(errorElement);
-        containerElement.setAttribute("data-rendered", "true");
-        console.log(`Issue not found: ${identifier}`);
-      }
-    } catch (error) {
-      console.error("Error fetching Linear issue:", error);
-      const errorElement = this.renderer.createErrorElement(
-        identifier,
-        displayMode
-      );
-      containerElement.replaceChildren(errorElement);
-      containerElement.setAttribute("data-rendered", "true");
     }
   }
 };
